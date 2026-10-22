@@ -13,8 +13,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks
 
-st.set_page_config(page_title="RSLAB 👨🏻‍🔬👩🏻‍🔬", layout="wide")
-st.title("RSLAB 👨🏻‍🔬👩🏻‍🔬")
+st.set_page_config(page_title="RSLAB Spectrum Viewer", layout="wide")
+st.title("RSLAB Spectrum Viewer")
 
 def read_text(upload):
     raw=upload.getvalue()
@@ -46,6 +46,49 @@ def parse_upload(upload):
             return len(fields)>=2 and values.notna().all()
         except Exception:
             return False
+
+    # Wide mapping exports store one spectrum per row: a spectral-axis header,
+    # followed by a time coordinate or X/Y coordinates and then intensity values.
+    first_idx=next((i for i,line in enumerate(lines) if line.strip()),None)
+    if first_idx is not None and "\t" in lines[first_idx]:
+        header_cells=lines[first_idx].split("\t")
+        coordinate_columns=0
+        while coordinate_columns<len(header_cells) and not header_cells[coordinate_columns].strip():
+            coordinate_columns+=1
+        axis_values=pd.to_numeric(pd.Series(header_cells[coordinate_columns:]),errors="coerce")
+        possible_mapping=(coordinate_columns in (1,2) and len(axis_values)>=50 and
+                          axis_values.notna().all() and np.all(np.diff(axis_values.to_numpy(float))>0))
+        if possible_mapping:
+            axis_values=axis_values.to_numpy(float)
+            mapped=[]
+            for line in lines[first_idx+1:]:
+                if not line.strip():
+                    continue
+                cells=line.split("\t")
+                if len(cells)<coordinate_columns+len(axis_values):
+                    continue
+                coords=pd.to_numeric(pd.Series(cells[:coordinate_columns]),errors="coerce")
+                intensities=pd.to_numeric(pd.Series(cells[coordinate_columns:coordinate_columns+len(axis_values)]),errors="coerce")
+                if coords.notna().all() and intensities.notna().sum()>=2:
+                    mapped.append((coords.to_numpy(float),intensities.to_numpy(float)))
+            if mapped:
+                for coords,intensities in mapped:
+                    if coordinate_columns==1:
+                        point_label=f"시간={coords[0]:g}"
+                        map_type="time"
+                        map_coordinate=float(coords[0])
+                    else:
+                        point_label=f"X={coords[0]:g}, Y={coords[1]:g}"
+                        map_type="space"
+                        map_coordinate=(float(coords[0]),float(coords[1]))
+                    good=np.isfinite(axis_values) & np.isfinite(intensities)
+                    if good.sum()>=2:
+                        series.append({"name":f"{file_stem} · {point_label}",
+                                       "x":axis_values[good],"raw":intensities[good],
+                                       "x_label":"Raman Shift (cm⁻¹)","y_label":"Intensity",
+                                       "mapping_type":map_type,"mapping_coordinate":map_coordinate})
+                if series:
+                    return series
 
     # Instrument exports may put key=value acquisition metadata before XYDATA=.
     # Parse that section explicitly instead of treating metadata lines as table rows.
@@ -412,7 +455,9 @@ with st.sidebar:
             if prior and not valid:
                 valid=parsed_names.copy()
             st.session_state["graph_selected"]=valid
-        st.multiselect("그릴 스펙트럼 선택",parsed_names,key="graph_selected",help="파일에서 파싱된 곡선이 목록에 표시됩니다. 선택한 곡선만 그래프에 그립니다.")
+        if any(s.get("mapping_type") in ("time","space") for s in st.session_state.series):
+            st.caption("매핑 데이터는 시간 또는 좌표별 스펙트럼으로 목록에 표시됩니다. 원하는 시간·좌표를 선택하면 해당 데이터만 그래프에 그립니다.")
+        st.multiselect("그릴 스펙트럼 선택",parsed_names,key="graph_selected",help="시간 매핑은 시간값, 공간 매핑은 X·Y 좌표로 구분됩니다. 선택한 항목만 그래프에 그립니다.")
 
 if not st.session_state.series:
     st.info("왼쪽에서 데이터를 불러오세요. 첫 번째 숫자 열을 X축으로 보고 나머지 숫자 열을 각각 곡선으로 추가합니다.")
@@ -507,7 +552,7 @@ with tabs[0]:
                 dim_col1,dim_col2=st.columns(2)
                 inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
                 inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-            with st.expander("여백 설정",expanded=False):
+            with st.expander("> 여백 설정",expanded=False):
                 if set_plot_box:
                     st.markdown("**플롯 박스 위치 (px)**")
                     pos_col1,pos_col2=st.columns(2)
