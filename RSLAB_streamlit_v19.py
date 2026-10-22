@@ -425,19 +425,24 @@ with tabs[0]:
             show_graph_frame=st.checkbox("위쪽·오른쪽 테두리 표시",value=True,key="graph_show_frame",
                                          help="체크를 해제해도 왼쪽 Y축과 아래쪽 X축 선은 유지됩니다.")
             graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
-            style_cols=st.columns(2)
             old_names=names.copy()
+            st.markdown("**곡선 이름 변경**")
+            name_cols=st.columns(2)
             for i,s in enumerate(series):
-                with style_cols[i%2]:
+                with name_cols[i%2]:
                     s["name"]=st.text_input(f"곡선 이름 {i+1}",s["name"],key=f"nm_{i}")
-                    palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
-                    curve_color=st.color_picker("선 색상",value=palette_color,key=f"color_{i}") if color_mode=="곡선별 지정" else palette_color
-                    curve_width=st.number_input("개별 선 굵기",min_value=0.5,max_value=10.0,value=float(line_width),step=0.1,key=f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
-                    style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
             renamed={old:new["name"] for old,new in zip(old_names,series)}
             selected=[renamed.get(name,name) for name in selected]
             st.session_state["graph_name_aliases"]=renamed
             names=[s["name"] for s in series]
+            st.markdown("**곡선 색상 및 선 굵기**")
+            style_cols=st.columns(2)
+            for i,s in enumerate(series):
+                with style_cols[i%2]:
+                    palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
+                    curve_color=st.color_picker("선 색상",value=palette_color,key=f"color_{i}") if color_mode=="곡선별 지정" else palette_color
+                    curve_width=st.number_input("개별 선 굵기",min_value=0.5,max_value=10.0,value=float(line_width),step=0.1,key=f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
+                    style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
         with size_tab:
             size_mode="전체 이미지 기준"
             st.caption("전체 이미지 크기를 먼저 정하고, 필요하면 그 안의 플롯 박스 크기를 따로 지정합니다.")
@@ -458,7 +463,7 @@ with tabs[0]:
                 dim_col1,dim_col2=st.columns(2)
                 inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
                 inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-            with st.expander("여백 설정",expanded=False):
+            with st.expander("> 여백 설정",expanded=False):
                 if set_plot_box:
                     st.markdown("**플롯 박스 위치 (px)**")
                     pos_col1,pos_col2=st.columns(2)
