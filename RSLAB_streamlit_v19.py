@@ -13,8 +13,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks
 
-st.set_page_config(page_title="RSLAB Spectrum Viewer", layout="wide")
-st.title("RSLAB Spectrum Viewer")
+st.set_page_config(page_title="RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬", layout="wide")
+st.title("RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬")
 
 def read_text(upload):
     raw=upload.getvalue()
