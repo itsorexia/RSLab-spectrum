@@ -47,6 +47,30 @@ def parse_upload(upload):
         except Exception:
             return False
 
+    # Instrument exports may put key=value acquisition metadata before XYDATA=.
+    # Parse that section explicitly instead of treating metadata lines as table rows.
+    xydata_idx=next((i for i,line in enumerate(lines) if line.strip().upper()=="XYDATA="),None)
+    if xydata_idx is not None:
+        metadata={}
+        for line in lines[:xydata_idx]:
+            if "=" in line:
+                key,value=line.split("=",1)
+                metadata[key.strip().upper()]=value.strip()
+        data_lines=[line.strip() for line in lines[xydata_idx+1:] if row_is_numeric(line.strip(),",")]
+        if data_lines:
+            data_df=pd.read_csv(io.StringIO("\n".join(data_lines)),header=None,sep=",",engine="python")
+            if data_df.shape[1]>=2:
+                x=pd.to_numeric(data_df.iloc[:,0],errors="coerce")
+                y=pd.to_numeric(data_df.iloc[:,1],errors="coerce")
+                valid=x.notna() & y.notna()
+                x_type=(metadata.get("TYPE","")+" "+metadata.get("XUNITS","")).lower()
+                is_uv=any(token in x_type for token in ("wavelength","nm"))
+                series=[{"name":file_stem,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
+                         "x_label":"Wavelength (nm)" if is_uv else "Raman Shift (cm⁻¹)",
+                         "y_label":"Absorbance" if is_uv else "Intensity"}]
+                if len(series[0]["x"])>=2:
+                    return series
+
     def sample_label(start,header_idx,sep):
         for j in range(header_idx-1,start-1,-1):
             candidate=lines[j].strip().strip('"').strip()
@@ -483,7 +507,7 @@ with tabs[0]:
                 dim_col1,dim_col2=st.columns(2)
                 inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
                 inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-            with st.expander("여백 설정",expanded=False):
+            with st.expander("> 여백 설정",expanded=False):
                 if set_plot_box:
                     st.markdown("**플롯 박스 위치 (px)**")
                     pos_col1,pos_col2=st.columns(2)
