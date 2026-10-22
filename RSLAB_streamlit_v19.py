@@ -439,7 +439,7 @@ with tabs[0]:
                 dim_col1,dim_col2=st.columns(2)
                 inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
                 inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-            with st.expander("> 여백 설정",expanded=False):
+            with st.expander("여백 설정",expanded=False):
                 if set_plot_box:
                     st.markdown("**플롯 박스 위치 (px)**")
                     pos_col1,pos_col2=st.columns(2)
