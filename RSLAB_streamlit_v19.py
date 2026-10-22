@@ -41,6 +41,19 @@ def parse_upload(upload):
             header_idx=i
             delimiter=sep
             break
+    sample_name=Path(upload.name).stem
+    if header_idx is not None:
+        # UV–Vis exports commonly store the sample name and acquisition time
+        # above the wavelength/absorbance header. Use the sample name for the
+        # parsed curve instead of the generic instrument filename.
+        for line in lines[:header_idx]:
+            candidate=line.strip().strip('"').strip()
+            if not candidate or candidate.startswith("#"):
+                continue
+            if re.match(r"^\d{1,2}/\d{1,2}/\d{4}(\s|$)",candidate):
+                continue
+            sample_name=candidate
+            break
     if header_idx is not None:
         df=pd.read_csv(io.StringIO("\n".join(lines[header_idx:])),sep=delimiter,comment="#",on_bad_lines="skip")
     else:
@@ -64,7 +77,8 @@ def parse_upload(upload):
         y=pd.to_numeric(df.iloc[:,j].astype(str).str.replace(",","",regex=False), errors="coerce")
         good=x.notna() & y.notna()
         if good.sum()>=2:
-            series.append({"name":f"{Path(upload.name).stem} · {c}" if str(c).strip() not in ("1","Intensity","Absorbance") else Path(upload.name).stem,
+            curve_name=sample_name if len(df.columns)==2 or str(c).strip().lower() in ("1","intensity","absorbance") else f"{sample_name} · {c}"
+            series.append({"name":curve_name,
                            "x":x[good].to_numpy(float),"raw":y[good].to_numpy(float),
                            "x_label":x_label,"y_label":"Absorbance" if x_label=="Wavelength (nm)" else "Intensity"})
     if not series: raise ValueError("사용 가능한 X/Y 숫자 쌍이 없습니다.")
@@ -257,17 +271,36 @@ with st.sidebar:
     uploads=st.file_uploader("CSV / TSV / TXT 파일",type=["csv","tsv","txt","dat","asc"],accept_multiple_files=True)
     if st.button("파일 불러오기", type="primary", use_container_width=True):
         loaded=[]; errors=[]
+        previous_names=[s["name"] for s in st.session_state.series]
         for f in uploads or []:
             try: loaded.extend(parse_upload(f))
             except Exception as e: errors.append(f"{f.name}: {e}")
         st.session_state.series.extend(loaded)
+        if loaded:
+            selected_before=st.session_state.get("graph_selected",previous_names)
+            st.session_state["graph_selected"]=list(dict.fromkeys([*selected_before,*[s["name"] for s in loaded]]))
         for e in errors: st.error(e)
-    if st.button("전체 지우기",use_container_width=True): st.session_state.series=[]
+    if st.button("전체 지우기",use_container_width=True):
+        st.session_state.series=[]
+        st.session_state["graph_selected"]=[]
     if st.session_state.series:
         st.download_button("현재 세션 저장 (.json)",state_json(st.session_state.series),"rslab_session.json","application/json",use_container_width=True)
         session=st.file_uploader("세션 불러오기 (.json)",type="json",key="session_upload")
         if session and st.button("세션 적용"):
             raw=json.loads(session.getvalue().decode("utf-8")); st.session_state.series=[{**s,"x":np.asarray(s["x"]),"raw":np.asarray(s["raw"])} for s in raw]; st.rerun()
+    if st.session_state.series:
+        parsed_names=[s["name"] for s in st.session_state.series]
+        aliases=st.session_state.pop("graph_name_aliases",{})
+        if "graph_selected" not in st.session_state:
+            st.session_state["graph_selected"]=parsed_names.copy()
+        else:
+            prior=st.session_state["graph_selected"]
+            migrated=[aliases.get(n,n) for n in prior]
+            valid=[n for n in migrated if n in parsed_names]
+            if prior and not valid:
+                valid=parsed_names.copy()
+            st.session_state["graph_selected"]=valid
+        st.multiselect("그릴 스펙트럼 선택",parsed_names,key="graph_selected",help="파일에서 파싱된 곡선이 목록에 표시됩니다. 선택한 곡선만 그래프에 그립니다.")
 
 if not st.session_state.series:
     st.info("왼쪽에서 데이터를 불러오세요. 첫 번째 숫자 열을 X축으로 보고 나머지 숫자 열을 각각 곡선으로 추가합니다.")
@@ -308,16 +341,7 @@ with tabs[0]:
         st.subheader("그래프 설정")
         stack_tab,visual_tab,size_tab,axis_tab=st.tabs(["수직 스택","비주얼","크기·글꼴","축 설정"])
         with stack_tab:
-            # Streamlit keeps keyed widget values across reruns and file changes.
-            # Drop names that no longer exist; if that leaves nothing selected,
-            # select the current curves so a new dataset cannot appear blank.
-            previous_selection=st.session_state.get("graph_selected")
-            if previous_selection is None:
-                st.session_state["graph_selected"]=names.copy()
-            else:
-                valid_selection=[n for n in previous_selection if n in names]
-                st.session_state["graph_selected"]=valid_selection or names.copy()
-            selected=st.multiselect("표시할 곡선",names,default=names,key="graph_selected")
+            selected=st.session_state.get("graph_selected",names.copy())
             stack=st.checkbox("수직 스택 사용",False,key="graph_stack")
             offset_step=st.number_input("곡선 간 추가 간격",value=0.0,key="graph_stack_step")
             st.caption("첫 번째 곡선이 위쪽에 오도록 자동 간격을 계산합니다.")
@@ -343,6 +367,7 @@ with tabs[0]:
                     style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
             renamed={old:new["name"] for old,new in zip(old_names,series)}
             selected=[renamed.get(name,name) for name in selected]
+            st.session_state["graph_name_aliases"]=renamed
             names=[s["name"] for s in series]
         with size_tab:
             size_mode="전체 이미지 기준"
