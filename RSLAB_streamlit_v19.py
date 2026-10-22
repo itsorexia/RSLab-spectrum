@@ -260,6 +260,26 @@ def apply_graph_frame(ax, visible, linewidth):
         spine.set_visible(True if side in ("left", "bottom") else visible)
         spine.set_linewidth(linewidth)
 
+def visible_stack_ylim(series, processed, names, plotted_names, auto_offsets, offset_step, style, x_min, x_max):
+    """Return padded Y limits from only the plotted points inside the visible X range."""
+    limits=[]
+    by_name={item["name"]:item for item in series}
+    x_min,x_max=sorted((float(x_min),float(x_max)))
+    for name in plotted_names:
+        item=by_name[name]
+        y_values=np.asarray(processed[name],dtype=float)
+        mask=(np.isfinite(item["x"]) & np.isfinite(y_values) &
+              (item["x"]>=x_min) & (item["x"]<=x_max))
+        if np.any(mask):
+            offset=auto_offsets[name]+offset_step*names.index(name)+style[name]["offset"]
+            limits.extend((y_values[mask]+offset).tolist())
+    if not limits:
+        return None
+    low,high=float(np.nanmin(limits)),float(np.nanmax(limits))
+    span=high-low
+    padding=0.05*span if span>0 else max(abs(high)*0.05,0.01)
+    return low-padding,high+padding
+
 def sync_widget_value(source_key, target_key):
     st.session_state[target_key]=st.session_state[source_key]
 
@@ -569,7 +589,10 @@ with tabs[0]:
             off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
             ax.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
         ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
-        if not y_auto: ax.set_ylim(min(ymin,ymax),max(ymin,ymax))
+        if y_auto:
+            visible_limits=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
+            if visible_limits: ax.set_ylim(*visible_limits)
+        else: ax.set_ylim(min(ymin,ymax),max(ymin,ymax))
         ax.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); ax.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
         ax.set_title(title or None,fontsize=title_font_size)
         ax.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size)
@@ -612,7 +635,10 @@ with tabs[1]:
                 ax2.plot(peak_s["x"],proc[n]+peak_offset,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
             ax2.scatter(s["x"][peaks],y[peaks]+peak_target_offset,color="red",zorder=5)
             ax2.set_xlim(min(xmin,xmax),max(xmin,xmax))
-            if not y_auto: ax2.set_ylim(min(ymin,ymax),max(ymin,ymax))
+            if y_auto:
+                visible_limits=visible_stack_ylim(series,proc,names,peak_plot_names,auto,offset_step,style,xmin,xmax)
+                if visible_limits: ax2.set_ylim(*visible_limits)
+            else: ax2.set_ylim(min(ymin,ymax),max(ymin,ymax))
             ax2.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); ax2.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
             ax2.set_title(title or None,fontsize=title_font_size)
             ax2.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size)
@@ -676,7 +702,10 @@ with tabs[2]:
             off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
             axout.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
     axout.set_xlim(min(xmin,xmax),max(xmin,xmax))
-    if not y_auto: axout.set_ylim(min(ymin,ymax),max(ymin,ymax))
+    if y_auto:
+        visible_limits=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
+        if visible_limits: axout.set_ylim(*visible_limits)
+    else: axout.set_ylim(min(ymin,ymax),max(ymin,ymax))
     axout.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); axout.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
     axout.set_title(title or None,fontsize=title_font_size)
     axout.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size)
