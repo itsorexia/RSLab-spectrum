@@ -404,7 +404,7 @@ with tabs[0]:
             st.caption("너비·높이는 미리보기와 저장 PNG의 전체 픽셀 크기입니다. 선명도를 높여도 픽셀 크기는 유지됩니다.")
             size_c1,size_c2=st.columns(2)
             plot_width=size_c1.number_input("너비 (px)",min_value=100,max_value=10000,value=600,step=50,key="graph_width_px")
-            plot_height=size_c2.number_input("높이 (px)",min_value=100,max_value=10000,value=200,step=50,key="graph_height_px")
+            plot_height=size_c2.number_input("높이 (px)",min_value=100,max_value=10000,value=400,step=50,key="graph_height_px")
             st.markdown("**그래프 위치 / 여백 (px)**")
             m1,m2=st.columns(2)
             margin_left=m1.number_input("왼쪽 여백",min_value=0,max_value=2000,value=65,step=5,key="graph_margin_left")
@@ -416,9 +416,9 @@ with tabs[0]:
                                        help="미리보기와 PNG 저장에 같은 DPI를 적용합니다. DPI를 바꿔도 설정한 픽셀 크기는 유지됩니다.")
             preview_dpi=export_dpi
             font_family=st.selectbox("글꼴",["Arial","DejaVu Sans","Liberation Sans","Times New Roman"],index=0,key="graph_font_family")
-            axis_label_size=st.slider("축 제목 글자 크기",6,40,12,key="graph_axis_font_size")
-            title_font_size=st.slider("그래프 제목 글자 크기",6,48,14,key="graph_title_font_size")
-            tick_font_size=st.slider("눈금 글자 크기",6,32,10,key="graph_tick_font_size")
+            axis_label_size=st.slider("축 제목 글자 크기",6,40,20,key="graph_axis_font_size")
+            title_font_size=st.slider("그래프 제목 글자 크기",6,48,25,key="graph_title_font_size")
+            tick_font_size=st.slider("눈금 글자 크기",6,32,16,key="graph_tick_font_size")
             legend_font_size=st.slider("범례 글자 크기",6,32,9,key="graph_legend_font_size")
             plot_margins=(margin_left,margin_right,margin_top,margin_bottom)
         with axis_tab:
