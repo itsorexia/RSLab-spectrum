@@ -13,8 +13,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks
 
-st.set_page_config(page_title="RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬", layout="wide")
-st.title("RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬")
+st.set_page_config(page_title="RSLAB Spectrum Viewer", layout="wide")
+st.title("RSLAB Spectrum Viewer")
 
 def read_text(upload):
     raw=upload.getvalue()
@@ -456,8 +456,34 @@ with st.sidebar:
                 valid=parsed_names.copy()
             st.session_state["graph_selected"]=valid
         if any(s.get("mapping_type") in ("time","space") for s in st.session_state.series):
-            st.caption("매핑 데이터는 시간 또는 좌표별 스펙트럼으로 목록에 표시됩니다. 원하는 시간·좌표를 선택하면 해당 데이터만 그래프에 그립니다.")
-        st.multiselect("그릴 스펙트럼 선택",parsed_names,key="graph_selected",help="시간 매핑은 시간값, 공간 매핑은 X·Y 좌표로 구분됩니다. 선택한 항목만 그래프에 그립니다.")
+            mapped=[s for s in st.session_state.series if s.get("mapping_type") in ("time","space")]
+            st.caption("매핑 스펙트럼은 좌표를 기준으로 표시합니다. 아래 목록에서 공간 위치를 확인하고, 그래프 선택 메뉴에서도 좌표를 골라 선택하세요.")
+            coordinate_rows=[]
+            for s in mapped:
+                coord=s.get("mapping_coordinate")
+                if s.get("mapping_type")=="space" and isinstance(coord,(tuple,list)) and len(coord)>=2:
+                    location=f"X = {coord[0]:g}, Y = {coord[1]:g}"
+                    kind="공간"
+                else:
+                    value=coord[0] if isinstance(coord,(tuple,list)) else coord
+                    location=f"시간 = {value:g}"
+                    kind="시간"
+                coordinate_rows.append({"파일":Path(s["name"].split(" · ")[0]).name,"종류":kind,"위치 / 시간":location})
+            st.dataframe(pd.DataFrame(coordinate_rows),hide_index=True,use_container_width=True)
+        else:
+            mapped=[]
+        def selection_label(name):
+            spec=next((item for item in mapped if item["name"]==name),None)
+            if spec is None:
+                return name if len(name)<=52 else f"…{name[-49:]}"
+            coord=spec.get("mapping_coordinate")
+            stem=Path(spec["name"].split(" · ")[0]).stem
+            short_stem=stem if len(stem)<=18 else f"{stem[:15]}…"
+            if spec.get("mapping_type")=="space" and isinstance(coord,(tuple,list)) and len(coord)>=2:
+                return f"{short_stem} · X={coord[0]:g}, Y={coord[1]:g}"
+            value=coord[0] if isinstance(coord,(tuple,list)) else coord
+            return f"{short_stem} · 시간={value:g}"
+        st.multiselect("그릴 스펙트럼 선택",parsed_names,key="graph_selected",format_func=selection_label,help="매핑 데이터는 파일명 대신 시간 또는 X/Y 좌표가 선택 목록에 표시됩니다. 선택한 항목만 그래프에 그립니다.")
 
 if not st.session_state.series:
     st.info("왼쪽에서 데이터를 불러오세요. 첫 번째 숫자 열을 X축으로 보고 나머지 숫자 열을 각각 곡선으로 추가합니다.")
@@ -552,7 +578,7 @@ with tabs[0]:
                 dim_col1,dim_col2=st.columns(2)
                 inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
                 inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-            with st.expander("여백 설정",expanded=False):
+            with st.expander("> 여백 설정",expanded=False):
                 if set_plot_box:
                     st.markdown("**플롯 박스 위치 (px)**")
                     pos_col1,pos_col2=st.columns(2)
