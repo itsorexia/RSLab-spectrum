@@ -374,7 +374,7 @@ with tabs[0]:
             selected=st.session_state.get("graph_selected",names.copy())
             stack=st.checkbox("수직 스택 사용",False,key="graph_stack")
             offset_step=st.number_input("곡선 간 추가 간격",value=0.0,key="graph_stack_step")
-            st.caption("첫 번째 곡선이 위쪽에 오도록 자동 간격을 계산합니다.")
+            st.caption("현재 X축 범위 안의 최대 intensity에 10%를 더해 자동 간격을 계산합니다. 첫 번째 곡선이 위쪽에 배치됩니다.")
             with st.expander("곡선별 오프셋",expanded=False):
                 st.caption("각 곡선의 세로 위치를 개별 조정합니다.")
                 for i,s in enumerate(series):
@@ -498,7 +498,17 @@ with tabs[0]:
         fig,ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
         apply_graph_frame(ax,show_graph_frame,graph_frame_width)
         proc={s["name"]:transform(s,opts) for s in series}
-        heights=[max(float(np.nanmax(proc[n])-np.nanmin(proc[n]))*1.10,0.01) for n in names]
+        # Base the automatic vertical stack spacing on the visible X range.
+        # This keeps the gaps proportional when the user zooms into a narrower range.
+        x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
+        heights=[]
+        for n in names:
+            s=next(z for z in series if z["name"]==n)
+            y_values=np.asarray(proc[n],dtype=float)
+            visible=np.isfinite(s["x"]) & np.isfinite(y_values) & (s["x"]>=x_range_min) & (s["x"]<=x_range_max)
+            values=y_values[visible] if np.any(visible) else y_values[np.isfinite(y_values)]
+            peak=float(np.nanmax(values)) if values.size else 0.0
+            heights.append(max(peak*1.10,0.01))
         auto={}
         for i,n in enumerate(names): auto[n]=sum(heights[i+1:]) if stack else 0
         for n in names:
