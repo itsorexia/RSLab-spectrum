@@ -280,6 +280,23 @@ def synced_font_control(label, minimum, maximum, default, key):
                           on_change=sync_widget_value,args=(input_key,key))
     return int(st.session_state[key])
 
+def synced_float_control(label, minimum, maximum, default, step, key, disabled=False):
+    input_key=f"{key}_input"
+    if key not in st.session_state and input_key not in st.session_state:
+        st.session_state[key]=default
+        st.session_state[input_key]=default
+    elif key not in st.session_state:
+        st.session_state[key]=st.session_state[input_key]
+    elif input_key not in st.session_state:
+        st.session_state[input_key]=st.session_state[key]
+    slider_col,input_col=st.columns([5,1])
+    slider_col.slider(label,min_value=minimum,max_value=maximum,step=step,key=key,disabled=disabled,
+                      on_change=sync_widget_value,args=(key,input_key))
+    input_col.number_input(label,min_value=minimum,max_value=maximum,step=step,format="%.1f",key=input_key,
+                           disabled=disabled,label_visibility="collapsed",help="숫자를 직접 입력할 수 있습니다.",
+                           on_change=sync_widget_value,args=(input_key,key))
+    return float(st.session_state[key])
+
 def axis_tick_options_ui(container, axis_name, key_prefix):
     with container:
         st.markdown(f"**{axis_name} 눈금 숫자 표시**")
@@ -404,10 +421,10 @@ with tabs[0]:
             palette=st.selectbox("색상 팔레트",["Origin","viridis","plasma","inferno","magma","cividis","turbo","coolwarm","rainbow"],key="graph_palette")
             color_mode=st.radio("색상 설정",["팔레트 사용","곡선별 지정"],horizontal=True,key="graph_color_mode")
             width_mode=st.radio("선 굵기 설정",["전체 동일","곡선별 지정"],horizontal=True,key="graph_width_mode")
-            line_width=st.slider("전체 선 굵기",0.5,5.0,1.8,0.1,key="graph_line_width")
+            line_width=synced_float_control("전체 선 굵기",0.5,5.0,1.8,0.1,"graph_line_width")
             show_graph_frame=st.checkbox("위쪽·오른쪽 테두리 표시",value=True,key="graph_show_frame",
                                          help="체크를 해제해도 왼쪽 Y축과 아래쪽 X축 선은 유지됩니다.")
-            graph_frame_width=st.slider("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,key="graph_frame_width",disabled=not show_graph_frame)
+            graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
             style_cols=st.columns(2)
             old_names=names.copy()
             for i,s in enumerate(series):
