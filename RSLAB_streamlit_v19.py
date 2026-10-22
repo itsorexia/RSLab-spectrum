@@ -259,6 +259,25 @@ def apply_graph_frame(ax, visible, linewidth):
         spine.set_visible(visible)
         spine.set_linewidth(linewidth)
 
+def sync_widget_value(source_key, target_key):
+    st.session_state[target_key]=st.session_state[source_key]
+
+def synced_font_control(label, minimum, maximum, default, key):
+    input_key=f"{key}_input"
+    if key not in st.session_state and input_key not in st.session_state:
+        st.session_state[key]=default
+        st.session_state[input_key]=default
+    elif key not in st.session_state:
+        st.session_state[key]=st.session_state[input_key]
+    elif input_key not in st.session_state:
+        st.session_state[input_key]=st.session_state[key]
+    slider_col,input_col=st.columns([5,1])
+    slider_col.slider(label,min_value,maximum,key=key,on_change=sync_widget_value,args=(key,input_key))
+    input_col.number_input(label,min_value=min_value,max_value=maximum,step=1,key=input_key,
+                          label_visibility="collapsed",help="숫자를 직접 입력할 수 있습니다.",
+                          on_change=sync_widget_value,args=(input_key,key))
+    return int(st.session_state[key])
+
 def axis_tick_options_ui(container, axis_name, key_prefix):
     with container:
         st.markdown(f"**{axis_name} 눈금 숫자 표시**")
@@ -402,6 +421,7 @@ with tabs[0]:
         with size_tab:
             size_mode="전체 이미지 기준"
             st.caption("전체 이미지 크기를 먼저 정하고, 필요하면 그 안의 플롯 박스 크기를 따로 지정합니다.")
+            st.markdown("#### 크기 및 여백")
             size_c1,size_c2=st.columns(2)
             plot_width=size_c1.number_input("전체 이미지 너비 (px)",min_value=100,max_value=10000,value=600,step=50,key="graph_width_px")
             plot_height=size_c2.number_input("전체 이미지 높이 (px)",min_value=100,max_value=10000,value=400,step=50,key="graph_height_px")
@@ -418,40 +438,42 @@ with tabs[0]:
                 dim_col1,dim_col2=st.columns(2)
                 inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
                 inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-                st.markdown("**플롯 박스 위치 (px)**")
-                pos_col1,pos_col2=st.columns(2)
-                margin_left=pos_col1.number_input("왼쪽 위치",min_value=0,max_value=2000,value=65,step=5,key="graph_margin_left")
-                margin_bottom=pos_col2.number_input("아래쪽 위치",min_value=0,max_value=2000,value=50,step=5,key="graph_margin_bottom")
-                max_inner_width=max(1,canvas_width_px-int(margin_left)-1)
-                max_inner_height=max(1,canvas_height_px-int(margin_bottom)-1)
-                if inner_width>max_inner_width or inner_height>max_inner_height:
-                    st.error("플롯 박스와 왼쪽·아래쪽 위치의 합이 전체 이미지 크기를 넘습니다. 박스 크기나 위치를 줄여주세요.")
-                safe_left=min(int(margin_left),canvas_width_px-2)
-                safe_bottom=min(int(margin_bottom),canvas_height_px-2)
-                safe_inner_width=min(int(inner_width),canvas_width_px-safe_left-1)
-                safe_inner_height=min(int(inner_height),canvas_height_px-safe_bottom-1)
-                margin_right=canvas_width_px-safe_left-safe_inner_width
-                margin_top=canvas_height_px-safe_bottom-safe_inner_height
-                plot_margins=(safe_left,margin_right,margin_top,safe_bottom)
-                st.caption(f"자동 여백 · 오른쪽 {margin_right} px · 위쪽 {margin_top} px")
-            else:
-                m1,m2=st.columns(2)
-                margin_left=m1.number_input("왼쪽 여백",min_value=0,max_value=2000,value=65,step=5,key="graph_margin_left")
-                margin_right=m2.number_input("오른쪽 여백",min_value=0,max_value=2000,value=20,step=5,key="graph_margin_right")
-                m3,m4=st.columns(2)
-                margin_top=m3.number_input("위쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_top")
-                margin_bottom=m4.number_input("아래쪽 여백",min_value=0,max_value=2000,value=50,step=5,key="graph_margin_bottom")
-                plot_margins=(margin_left,margin_right,margin_top,margin_bottom)
+            with st.expander("> 여백 설정",expanded=False):
+                if set_plot_box:
+                    st.markdown("**플롯 박스 위치 (px)**")
+                    pos_col1,pos_col2=st.columns(2)
+                    margin_left=pos_col1.number_input("왼쪽 위치",min_value=0,max_value=2000,value=65,step=5,key="graph_margin_left")
+                    margin_bottom=pos_col2.number_input("아래쪽 위치",min_value=0,max_value=2000,value=50,step=5,key="graph_margin_bottom")
+                    max_inner_width=max(1,canvas_width_px-int(margin_left)-1)
+                    max_inner_height=max(1,canvas_height_px-int(margin_bottom)-1)
+                    if inner_width>max_inner_width or inner_height>max_inner_height:
+                        st.error("플롯 박스와 왼쪽·아래쪽 위치의 합이 전체 이미지 크기를 넘습니다. 박스 크기나 위치를 줄여주세요.")
+                    safe_left=min(int(margin_left),canvas_width_px-2)
+                    safe_bottom=min(int(margin_bottom),canvas_height_px-2)
+                    safe_inner_width=min(int(inner_width),canvas_width_px-safe_left-1)
+                    safe_inner_height=min(int(inner_height),canvas_height_px-safe_bottom-1)
+                    margin_right=canvas_width_px-safe_left-safe_inner_width
+                    margin_top=canvas_height_px-safe_bottom-safe_inner_height
+                    plot_margins=(safe_left,margin_right,margin_top,safe_bottom)
+                    st.caption(f"자동 여백 · 오른쪽 {margin_right} px · 위쪽 {margin_top} px")
+                else:
+                    m1,m2=st.columns(2)
+                    margin_left=m1.number_input("왼쪽 여백",min_value=0,max_value=2000,value=65,step=5,key="graph_margin_left")
+                    margin_right=m2.number_input("오른쪽 여백",min_value=0,max_value=2000,value=20,step=5,key="graph_margin_right")
+                    m3,m4=st.columns(2)
+                    margin_top=m3.number_input("위쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_top")
+                    margin_bottom=m4.number_input("아래쪽 여백",min_value=0,max_value=2000,value=50,step=5,key="graph_margin_bottom")
+                    plot_margins=(margin_left,margin_right,margin_top,margin_bottom)
             plot_box_width=int(canvas_width_px-margin_left-margin_right)
             plot_box_height=int(canvas_height_px-margin_top-margin_bottom)
             export_dpi=st.number_input("미리보기 / PNG 저장 DPI",min_value=100,max_value=1200,value=300,step=50,key="graph_export_dpi",
                                        help="미리보기와 PNG 저장에 같은 DPI를 적용합니다. DPI를 바꿔도 설정한 픽셀 크기는 유지됩니다.")
             preview_dpi=export_dpi
             font_family=st.selectbox("글꼴",["Arial","DejaVu Sans","Liberation Sans","Times New Roman"],index=0,key="graph_font_family")
-            axis_label_size=st.slider("축 제목 글자 크기",6,40,12,key="graph_axis_font_size")
-            title_font_size=st.slider("그래프 제목 글자 크기",6,48,14,key="graph_title_font_size")
-            tick_font_size=st.slider("눈금 글자 크기",6,32,10,key="graph_tick_font_size")
-            legend_font_size=st.slider("범례 글자 크기",6,32,9,key="graph_legend_font_size")
+            axis_label_size=synced_font_control("축 제목 글자 크기",6,40,12,"graph_axis_font_size")
+            title_font_size=synced_font_control("그래프 제목 글자 크기",6,48,14,"graph_title_font_size")
+            tick_font_size=synced_font_control("눈금 글자 크기",6,32,10,"graph_tick_font_size")
+            legend_font_size=synced_font_control("범례 글자 크기",6,32,9,"graph_legend_font_size")
         with axis_tab:
             st.markdown("**축 범위**")
             x_auto=st.checkbox("X축 자동 범위",value=True,key="graph_x_auto")
