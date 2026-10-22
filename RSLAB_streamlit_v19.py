@@ -272,8 +272,9 @@ def synced_font_control(label, minimum, maximum, default, key):
     elif input_key not in st.session_state:
         st.session_state[input_key]=st.session_state[key]
     slider_col,input_col=st.columns([5,1])
-    slider_col.slider(label,min_value,maximum,key=key,on_change=sync_widget_value,args=(key,input_key))
-    input_col.number_input(label,min_value=min_value,max_value=maximum,step=1,key=input_key,
+    slider_col.slider(label,min_value=minimum,max_value=maximum,key=key,
+                      on_change=sync_widget_value,args=(key,input_key))
+    input_col.number_input(label,min_value=minimum,max_value=maximum,step=1,key=input_key,
                           label_visibility="collapsed",help="숫자를 직접 입력할 수 있습니다.",
                           on_change=sync_widget_value,args=(input_key,key))
     return int(st.session_state[key])
