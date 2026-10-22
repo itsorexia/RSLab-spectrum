@@ -463,7 +463,7 @@ with tabs[0]:
                 dim_col1,dim_col2=st.columns(2)
                 inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
                 inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-            with st.expander("> 여백 설정",expanded=False):
+            with st.expander("여백 설정",expanded=False):
                 if set_plot_box:
                     st.markdown("**플롯 박스 위치 (px)**")
                     pos_col1,pos_col2=st.columns(2)
@@ -500,6 +500,10 @@ with tabs[0]:
             tick_font_size=synced_font_control("눈금 글자 크기",6,32,10,"graph_tick_font_size")
             legend_font_size=synced_font_control("범례 글자 크기",6,32,9,"graph_legend_font_size")
         with axis_tab:
+            with st.expander("축 제목 / 그래프 제목",expanded=False):
+                xlab=st.text_input("X축 제목",series[0]["x_label"],key="graph_xlabel")
+                ylab=st.text_input("Y축 제목","Normalized Intensity" if normalization!="없음" else series[0]["y_label"],key="graph_ylabel")
+                title=st.text_input("그래프 제목",key="graph_title")
             st.markdown("**축 범위**")
             x_auto=st.checkbox("X축 자동 범위",value=True,key="graph_x_auto")
             data_xmin=float(min(np.nanmin(s["x"]) for s in series)); data_xmax=float(max(np.nanmax(s["x"]) for s in series))
@@ -529,9 +533,6 @@ with tabs[0]:
                 st.error(f"Y축 눈금 수식 오류: {e}")
                 y_tick_options["formula"]=""
                 y_tick_formatter=make_tick_formatter(y_tick_options)
-            xlab=st.text_input("X축 제목",series[0]["x_label"],key="graph_xlabel")
-            ylab=st.text_input("Y축 제목","Normalized Intensity" if normalization!="없음" else series[0]["y_label"],key="graph_ylabel")
-            title=st.text_input("그래프 제목",key="graph_title")
             grid=st.checkbox("격자 표시",False,key="graph_grid")
             legend=st.checkbox("범례 표시",True,key="graph_legend")
         if not x_auto and xmin>=xmax:
