@@ -255,8 +255,9 @@ def add_y_scale_annotation(ax, options, fontsize):
         ax.text(0.0,1.005,label,transform=ax.transAxes,ha="left",va="bottom",fontsize=fontsize,clip_on=False)
 
 def apply_graph_frame(ax, visible, linewidth):
-    for spine in ax.spines.values():
-        spine.set_visible(visible)
+    # Keep the X/Y axes visible; the frame toggle controls only the top/right box edges.
+    for side, spine in ax.spines.items():
+        spine.set_visible(True if side in ("left", "bottom") else visible)
         spine.set_linewidth(linewidth)
 
 def sync_widget_value(source_key, target_key):
@@ -404,8 +405,9 @@ with tabs[0]:
             color_mode=st.radio("색상 설정",["팔레트 사용","곡선별 지정"],horizontal=True,key="graph_color_mode")
             width_mode=st.radio("선 굵기 설정",["전체 동일","곡선별 지정"],horizontal=True,key="graph_width_mode")
             line_width=st.slider("전체 선 굵기",0.5,5.0,1.8,0.1,key="graph_line_width")
-            show_graph_frame=st.checkbox("그래프 박스 테두리 표시",value=True,key="graph_show_frame")
-            graph_frame_width=st.slider("그래프 박스 선 두께",0.1,5.0,1.0,0.1,key="graph_frame_width",disabled=not show_graph_frame)
+            show_graph_frame=st.checkbox("위쪽·오른쪽 테두리 표시",value=True,key="graph_show_frame",
+                                         help="체크를 해제해도 왼쪽 Y축과 아래쪽 X축 선은 유지됩니다.")
+            graph_frame_width=st.slider("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,key="graph_frame_width",disabled=not show_graph_frame)
             style_cols=st.columns(2)
             old_names=names.copy()
             for i,s in enumerate(series):
