@@ -140,7 +140,7 @@ def transform(s, opts):
     return y
 
 def make_plot(width_px, height_px, size_mode, margins, dpi):
-    """Create a plot whose canvas is the requested pixel size at any DPI."""
+    """Create a plot with either a fixed canvas or fixed inner plot dimensions."""
     left, right, top, bottom = [float(v) for v in margins]
     if min(left, right, top, bottom) < 0:
         raise ValueError("그래프 여백은 0 이상이어야 합니다.")
@@ -400,25 +400,33 @@ with tabs[0]:
             st.session_state["graph_name_aliases"]=renamed
             names=[s["name"] for s in series]
         with size_tab:
-            size_mode="전체 이미지 기준"
-            st.caption("너비·높이는 미리보기와 저장 PNG의 전체 픽셀 크기입니다. 선명도를 높여도 픽셀 크기는 유지됩니다.")
+            size_mode=st.radio("크기 기준",["전체 이미지 기준","플롯 영역 기준"],horizontal=True,key="graph_size_mode",
+                               help="전체 이미지 기준은 여백을 포함한 PNG 크기, 플롯 영역 기준은 축 안쪽 그래프 박스 크기를 지정합니다.")
+            if size_mode=="전체 이미지 기준":
+                st.caption("너비·높이는 여백을 포함한 전체 PNG 크기입니다.")
+                width_label,height_label="전체 너비 (px)","전체 높이 (px)"
+            else:
+                st.caption("너비·높이는 축 안쪽 플롯 박스 크기입니다. 여백을 더한 값이 전체 PNG 크기가 됩니다.")
+                width_label,height_label="플롯 박스 너비 (px)","플롯 박스 높이 (px)"
             size_c1,size_c2=st.columns(2)
-            plot_width=size_c1.number_input("너비 (px)",min_value=100,max_value=10000,value=600,step=50,key="graph_width_px")
-            plot_height=size_c2.number_input("높이 (px)",min_value=100,max_value=10000,value=400,step=50,key="graph_height_px")
+            plot_width=size_c1.number_input(width_label,min_value=100,max_value=10000,value=600,step=50,key="graph_width_px")
+            plot_height=size_c2.number_input(height_label,min_value=100,max_value=10000,value=400,step=50,key="graph_height_px")
             st.markdown("**그래프 위치 / 여백 (px)**")
             m1,m2=st.columns(2)
             margin_left=m1.number_input("왼쪽 여백",min_value=0,max_value=2000,value=65,step=5,key="graph_margin_left")
-            margin_right=m2.number_input("오른쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_right")
+            margin_right=m2.number_input("오른쪽 여백",min_value=0,max_value=2000,value=20,step=5,key="graph_margin_right")
             m3,m4=st.columns(2)
             margin_top=m3.number_input("위쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_top")
             margin_bottom=m4.number_input("아래쪽 여백",min_value=0,max_value=2000,value=50,step=5,key="graph_margin_bottom")
+            canvas_width_px=int(plot_width if size_mode=="전체 이미지 기준" else plot_width+margin_left+margin_right)
+            canvas_height_px=int(plot_height if size_mode=="전체 이미지 기준" else plot_height+margin_top+margin_bottom)
             export_dpi=st.number_input("미리보기 / PNG 저장 DPI",min_value=100,max_value=1200,value=300,step=50,key="graph_export_dpi",
                                        help="미리보기와 PNG 저장에 같은 DPI를 적용합니다. DPI를 바꿔도 설정한 픽셀 크기는 유지됩니다.")
             preview_dpi=export_dpi
             font_family=st.selectbox("글꼴",["Arial","DejaVu Sans","Liberation Sans","Times New Roman"],index=0,key="graph_font_family")
-            axis_label_size=st.slider("축 제목 글자 크기",6,40,20,key="graph_axis_font_size")
-            title_font_size=st.slider("그래프 제목 글자 크기",6,48,25,key="graph_title_font_size")
-            tick_font_size=st.slider("눈금 글자 크기",6,32,16,key="graph_tick_font_size")
+            axis_label_size=st.slider("축 제목 글자 크기",6,40,12,key="graph_axis_font_size")
+            title_font_size=st.slider("그래프 제목 글자 크기",6,48,14,key="graph_title_font_size")
+            tick_font_size=st.slider("눈금 글자 크기",6,32,10,key="graph_tick_font_size")
             legend_font_size=st.slider("범례 글자 크기",6,32,9,key="graph_legend_font_size")
             plot_margins=(margin_left,margin_right,margin_top,margin_bottom)
         with axis_tab:
@@ -491,8 +499,8 @@ with tabs[0]:
         add_y_scale_annotation(ax,y_tick_options,tick_font_size)
         if grid: ax.grid(True,alpha=.3)
         if legend: ax.legend(fontsize=legend_font_size)
-        preview_png=render_png_fixed_size(fig,plot_width,plot_height,preview_dpi)
-        st.image(preview_png,width=int(plot_width)); plt.close(fig)
+        preview_png=render_png_fixed_size(fig,canvas_width_px,canvas_height_px,preview_dpi)
+        st.image(preview_png,width=canvas_width_px); plt.close(fig)
         st.caption(f"곡선 {len(series)}개 · 원본 데이터는 전체 해상도로 분석/내보내기합니다.")
 
 with tabs[1]:
@@ -534,7 +542,7 @@ with tabs[1]:
             add_y_scale_annotation(ax2,y_tick_options,tick_font_size)
             if grid: ax2.grid(True,alpha=.3)
             if legend: ax2.legend(fontsize=legend_font_size)
-            st.image(render_png_fixed_size(fig2,plot_width,plot_height,preview_dpi),width=int(plot_width)); plt.close(fig2)
+            st.image(render_png_fixed_size(fig2,canvas_width_px,canvas_height_px,preview_dpi),width=canvas_width_px); plt.close(fig2)
             st.download_button("피크 결과 CSV",peak_df.to_csv(index=False).encode("utf-8-sig"),"peaks.csv","text/csv")
     with max_tab:
         st.subheader("선택 곡선의 최대 intensity")
@@ -598,9 +606,9 @@ with tabs[2]:
     add_y_scale_annotation(axout,y_tick_options,tick_font_size)
     if legend: axout.legend(fontsize=legend_font_size)
     if grid: axout.grid(True,alpha=.3)
-    png_data=render_png_fixed_size(figout,plot_width,plot_height,export_dpi); plt.close(figout)
-    st.download_button(f"그래프 PNG ({plot_width} × {plot_height} px)",png_data,"spectrum.png","image/png")
-    st.caption(f"저장 이미지 크기: {plot_width} × {plot_height} px · PNG 저장 DPI: {export_dpi}")
+    png_data=render_png_fixed_size(figout,canvas_width_px,canvas_height_px,export_dpi); plt.close(figout)
+    st.download_button(f"그래프 PNG ({canvas_width_px} × {canvas_height_px} px)",png_data,"spectrum.png","image/png")
+    st.caption(f"플롯 박스: {plot_width} × {plot_height} px · 전체 PNG: {canvas_width_px} × {canvas_height_px} px · DPI: {export_dpi}")
     rows=[]
     for n in selected:
         s=next(z for z in series if z["name"]==n)
