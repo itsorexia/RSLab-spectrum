@@ -24,63 +24,93 @@ def read_text(upload):
     return raw.decode("utf-8", errors="replace")
 
 def parse_upload(upload):
-    """Parse common two-column and multi-column CSV/TSV exports."""
+    """Parse ordinary tables and files containing repeated spectrum blocks."""
     text=read_text(upload)
     lines=text.splitlines()
-    # Spectrometer exports often put a sample name and timestamp before the
-    # actual column header. Sniffing the whole file can mistake underscores
-    # in the sample name for the data delimiter, so start at the real header.
-    header_idx=None
-    delimiter=None
     x_terms=("wavelength","raman","shift","wavenumber","wave number","cm-1","cm⁻¹")
+    header_rows=[]
     for i,line in enumerate(lines):
         low=line.lower()
         counts={d:line.count(d) for d in (",","\t",";")}
         sep=max(counts,key=counts.get)
         if counts[sep] and any(term in low for term in x_terms):
-            header_idx=i
-            delimiter=sep
-            break
-    sample_name=Path(upload.name).stem
-    if header_idx is not None:
-        # UV–Vis exports commonly store the sample name and acquisition time
-        # above the wavelength/absorbance header. Use the sample name for the
-        # parsed curve instead of the generic instrument filename.
-        for line in lines[:header_idx]:
-            candidate=line.strip().strip('"').strip()
+            header_rows.append((i,sep))
+
+    series=[]
+    file_stem=Path(upload.name).stem
+
+    def row_is_numeric(line,sep):
+        try:
+            fields=next(csv.reader([line],delimiter=sep))
+            values=pd.to_numeric(pd.Series(fields),errors="coerce")
+            return len(fields)>=2 and values.notna().all()
+        except Exception:
+            return False
+
+    def sample_label(start,header_idx,sep):
+        for j in range(header_idx-1,start-1,-1):
+            candidate=lines[j].strip().strip('"').strip()
             if not candidate or candidate.startswith("#"):
                 continue
-            if re.match(r"^\d{1,2}/\d{1,2}/\d{4}(\s|$)",candidate):
+            if re.match(r"^\d{1,2}/\d{1,2}/\d{4}(\s|$)",candidate) or row_is_numeric(candidate,sep):
                 continue
-            sample_name=candidate
-            break
-    if header_idx is not None:
-        df=pd.read_csv(io.StringIO("\n".join(lines[header_idx:])),sep=delimiter,comment="#",on_bad_lines="skip")
+            return candidate,j
+        return file_stem,None
+
+    if header_rows:
+        labels=[]
+        for i,(header_idx,sep) in enumerate(header_rows):
+            search_start=header_rows[i-1][0]+1 if i else 0
+            labels.append(sample_label(search_start,header_idx,sep))
+
+        for i,(header_idx,sep) in enumerate(header_rows):
+            label,_=labels[i]
+            if i+1<len(header_rows):
+                next_label_idx=labels[i+1][1]
+                block_end=next_label_idx if next_label_idx is not None else header_rows[i+1][0]
+            else:
+                block_end=len(lines)
+            block_text="\n".join(lines[header_idx:block_end])
+            df=pd.read_csv(io.StringIO(block_text),sep=sep,comment="#",on_bad_lines="skip")
+            df=df.dropna(axis=1,how="all").dropna(axis=0,how="all")
+            if len(df.columns)<2:
+                continue
+            norm=[str(c).strip().lower() for c in df.columns]
+            xi=next((j for j,n in enumerate(norm) if any(k in n for k in ("raman","shift","wavelength","lambda","nm","x"))),0)
+            x=pd.to_numeric(df.iloc[:,xi].astype(str).str.replace(",","",regex=False),errors="coerce")
+            x_label="Wavelength (nm)" if any(k in norm[xi] for k in ("wavelength","nm")) else "Raman Shift (cm⁻¹)"
+            y_columns=[j for j in range(len(df.columns)) if j!=xi]
+            for j in y_columns:
+                y=pd.to_numeric(df.iloc[:,j].astype(str).str.replace(",","",regex=False),errors="coerce")
+                good=x.notna() & y.notna()
+                if good.sum()<2:
+                    continue
+                curve_name=label if len(y_columns)==1 else f"{label} · {df.columns[j]}"
+                if any(existing["name"]==curve_name for existing in series):
+                    curve_name=f"{curve_name} ({i+1})"
+                series.append({"name":curve_name,"x":x[good].to_numpy(float),"raw":y[good].to_numpy(float),
+                               "x_label":x_label,"y_label":"Absorbance" if x_label=="Wavelength (nm)" else "Intensity"})
     else:
-        try: df=pd.read_csv(io.StringIO(text), sep=None, engine="python", comment="#", on_bad_lines="skip")
-        except Exception: df=pd.read_csv(io.StringIO(text), header=None, sep=None, engine="python", comment="#", on_bad_lines="skip")
-    # Headerless numeric data is often interpreted as a header; detect numeric labels.
-    numeric_header = len(df.columns)>=2 and all(pd.to_numeric(pd.Series([str(c).replace(",","")]),errors="coerce").notna().iloc[0] for c in df.columns[:2])
-    if len(df.columns)<2 or len(df)<2 or numeric_header:
-        df=pd.read_csv(io.StringIO(text), header=None, sep=None, engine="python", comment="#", on_bad_lines="skip")
-    df=df.dropna(axis=1, how="all").dropna(axis=0, how="all")
-    if len(df.columns)<2: raise ValueError("숫자 데이터 열을 2개 이상 찾지 못했습니다.")
-    # Use named X/wavelength/Raman shift column when available, else first column.
-    norm=[str(c).strip().lower() for c in df.columns]
-    xi=next((i for i,n in enumerate(norm) if any(k in n for k in ("raman","shift","wavelength","lambda","nm","x"))),0)
-    x=pd.to_numeric(df.iloc[:,xi].astype(str).str.replace(",","",regex=False), errors="coerce")
-    x_header=str(df.columns[xi]).strip().lower()
-    x_label="Wavelength (nm)" if ("wavelength" in x_header or "nm" in x_header) else "Raman Shift (cm⁻¹)"
-    series=[]
-    for j,c in enumerate(df.columns):
-        if j==xi: continue
-        y=pd.to_numeric(df.iloc[:,j].astype(str).str.replace(",","",regex=False), errors="coerce")
-        good=x.notna() & y.notna()
-        if good.sum()>=2:
-            curve_name=sample_name if len(df.columns)==2 or str(c).strip().lower() in ("1","intensity","absorbance") else f"{sample_name} · {c}"
-            series.append({"name":curve_name,
-                           "x":x[good].to_numpy(float),"raw":y[good].to_numpy(float),
-                           "x_label":x_label,"y_label":"Absorbance" if x_label=="Wavelength (nm)" else "Intensity"})
+        # Retain support for headerless numeric CSV/TSV files.
+        try: df=pd.read_csv(io.StringIO(text),sep=None,engine="python",comment="#",on_bad_lines="skip")
+        except Exception: df=pd.read_csv(io.StringIO(text),header=None,sep=None,engine="python",comment="#",on_bad_lines="skip")
+        numeric_header=len(df.columns)>=2 and all(pd.to_numeric(pd.Series([str(c).replace(",","")]),errors="coerce").notna().iloc[0] for c in df.columns[:2])
+        if len(df.columns)<2 or len(df)<2 or numeric_header:
+            df=pd.read_csv(io.StringIO(text),header=None,sep=None,engine="python",comment="#",on_bad_lines="skip")
+        df=df.dropna(axis=1,how="all").dropna(axis=0,how="all")
+        if len(df.columns)>=2:
+            norm=[str(c).strip().lower() for c in df.columns]
+            xi=next((j for j,n in enumerate(norm) if any(k in n for k in ("raman","shift","wavelength","lambda","nm","x"))),0)
+            x=pd.to_numeric(df.iloc[:,xi].astype(str).str.replace(",","",regex=False),errors="coerce")
+            x_label="Wavelength (nm)" if any(k in norm[xi] for k in ("wavelength","nm")) else "Raman Shift (cm⁻¹)"
+            y_columns=[j for j in range(len(df.columns)) if j!=xi]
+            for j in y_columns:
+                y=pd.to_numeric(df.iloc[:,j].astype(str).str.replace(",","",regex=False),errors="coerce")
+                good=x.notna() & y.notna()
+                if good.sum()>=2:
+                    label=file_stem if len(y_columns)==1 else f"{file_stem} · {df.columns[j]}"
+                    series.append({"name":label,"x":x[good].to_numpy(float),"raw":y[good].to_numpy(float),
+                                   "x_label":x_label,"y_label":"Absorbance" if x_label=="Wavelength (nm)" else "Intensity"})
     if not series: raise ValueError("사용 가능한 X/Y 숫자 쌍이 없습니다.")
     return series
 
