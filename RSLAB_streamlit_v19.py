@@ -555,6 +555,20 @@ with tabs[0]:
                 y_tick_formatter=make_tick_formatter(y_tick_options)
             grid=st.checkbox("격자 표시",False,key="graph_grid")
             legend=st.checkbox("범례 표시",True,key="graph_legend")
+            legend_locations={
+                "자동 (겹침 최소화)":"best",
+                "오른쪽 위":"upper right",
+                "왼쪽 위":"upper left",
+                "왼쪽 아래":"lower left",
+                "오른쪽 아래":"lower right",
+                "오른쪽 가운데":"center right",
+                "왼쪽 가운데":"center left",
+                "위 가운데":"upper center",
+                "아래 가운데":"lower center",
+                "가운데":"center",
+            }
+            legend_position=st.selectbox("범례 위치",list(legend_locations),disabled=not legend,key="graph_legend_location")
+            legend_loc=legend_locations[legend_position]
         if not x_auto and xmin>=xmax:
             st.error("X 최소값은 X 최대값보다 작아야 합니다.")
             xmin,xmax=data_xmin,data_xmax
@@ -602,7 +616,7 @@ with tabs[0]:
         ax.yaxis.set_major_formatter(y_tick_formatter)
         add_y_scale_annotation(ax,y_tick_options,tick_font_size)
         if grid: ax.grid(True,alpha=.3)
-        if legend: ax.legend(fontsize=legend_font_size)
+        if legend: ax.legend(fontsize=legend_font_size,loc=legend_loc)
         preview_png=render_png_fixed_size(fig,canvas_width_px,canvas_height_px,preview_dpi)
         st.image(preview_png,width=canvas_width_px); plt.close(fig)
         st.caption(f"곡선 {len(series)}개 · 원본 데이터는 전체 해상도로 분석/내보내기합니다.")
@@ -648,7 +662,7 @@ with tabs[1]:
             ax2.yaxis.set_major_formatter(y_tick_formatter)
             add_y_scale_annotation(ax2,y_tick_options,tick_font_size)
             if grid: ax2.grid(True,alpha=.3)
-            if legend: ax2.legend(fontsize=legend_font_size)
+            if legend: ax2.legend(fontsize=legend_font_size,loc=legend_loc)
             st.image(render_png_fixed_size(fig2,canvas_width_px,canvas_height_px,preview_dpi),width=canvas_width_px); plt.close(fig2)
             st.download_button("피크 결과 CSV",peak_df.to_csv(index=False).encode("utf-8-sig"),"peaks.csv","text/csv")
     with max_tab:
@@ -714,7 +728,7 @@ with tabs[2]:
     if y_tick_interval>0: axout.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
     axout.yaxis.set_major_formatter(y_tick_formatter)
     add_y_scale_annotation(axout,y_tick_options,tick_font_size)
-    if legend: axout.legend(fontsize=legend_font_size)
+    if legend: axout.legend(fontsize=legend_font_size,loc=legend_loc)
     if grid: axout.grid(True,alpha=.3)
     png_data=render_png_fixed_size(figout,canvas_width_px,canvas_height_px,export_dpi); plt.close(figout)
     st.download_button(f"그래프 PNG ({canvas_width_px} × {canvas_height_px} px)",png_data,"spectrum.png","image/png")
