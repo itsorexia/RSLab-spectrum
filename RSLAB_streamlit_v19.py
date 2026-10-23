@@ -466,39 +466,44 @@ series=st.session_state.series
 names=[s["name"] for s in series]
 mapped=[s for s in series if s.get("mapping_type") in ("time","space")]
 spatial=[s for s in mapped if s.get("mapping_type")=="space" and isinstance(s.get("mapping_coordinate"),(tuple,list)) and len(s["mapping_coordinate"])>=2]
-if spatial:
-    st.subheader("공간 위치 선택")
-    st.caption("아래 공간 맵에서 점을 클릭하면 선택한 위치의 스펙트럼이 그래프에 표시됩니다. 점 위에 마우스를 올리면 좌표를 확인할 수 있습니다.")
-    spatial_files={}
-    for spec in spatial:
-        source=spec.get("mapping_source",spec["name"].split(" · ")[0])
-        spatial_files.setdefault(source,[]).append(spec)
-    source_options=list(spatial_files)
-    chosen_source=st.selectbox("공간 매핑 파일",source_options,format_func=lambda source:Path(source).name,key="spatial_map_file")
-    map_specs=spatial_files[chosen_source]
-    map_df=pd.DataFrame([{"X":float(s["mapping_coordinate"][0]),"Y":float(s["mapping_coordinate"][1]),"series_name":s["name"]} for s in map_specs])
-    map_df["coordinate_label"]=[f"({row.X:g}, {row.Y:g})" for row in map_df.itertuples()]
-    map_fig=px.scatter(map_df,x="X",y="Y",text="coordinate_label",custom_data=["series_name"])
-    map_fig.update_traces(marker={"size":16,"color":"#168aad","line":{"width":1,"color":"white"}},
-                          textposition="top center",
-                          hovertemplate="X = %{x:g}<br>Y = %{y:g}<extra></extra>")
-    map_fig.update_layout(height=380,margin={"l":12,"r":12,"t":8,"b":8},
-                          xaxis_title="X 좌표",yaxis_title="Y 좌표",showlegend=False,
-                          dragmode=False,clickmode="event+select")
-    map_event=st.plotly_chart(map_fig,use_container_width=True,on_select="rerun",selection_mode="points",key="spatial_coordinate_map")
-    try:
-        selected_points=map_event.selection.points
-        if selected_points:
-            point_data=selected_points[-1].get("customdata")
-            picked_name=point_data[0] if isinstance(point_data,(list,tuple)) else point_data
-            if picked_name in names:
+with st.sidebar:
+    if spatial:
+        st.markdown("**공간 위치 선택**")
+        st.caption("점 클릭 또는 드래그로 여러 좌표를 선택하세요.")
+        spatial_files={}
+        for spec in spatial:
+            source=spec.get("mapping_source",spec["name"].split(" · ")[0])
+            spatial_files.setdefault(source,[]).append(spec)
+        source_options=list(spatial_files)
+        chosen_source=st.selectbox("공간 매핑 파일",source_options,format_func=lambda source:Path(source).name,key="spatial_map_file")
+        map_specs=spatial_files[chosen_source]
+        map_df=pd.DataFrame([{"X":float(s["mapping_coordinate"][0]),"Y":float(s["mapping_coordinate"][1]),"series_name":s["name"]} for s in map_specs])
+        map_df["coordinate_label"]=[f"({row.X:g}, {row.Y:g})" for row in map_df.itertuples()]
+        map_fig=px.scatter(map_df,x="X",y="Y",text="coordinate_label",custom_data=["series_name"])
+        map_fig.update_traces(marker={"size":11,"color":"#168aad","line":{"width":1,"color":"white"}},
+                              textposition="top center",
+                              hovertemplate="X = %{x:g}<br>Y = %{y:g}<extra></extra>")
+        map_fig.update_layout(height=300,margin={"l":8,"r":8,"t":8,"b":8},
+                              xaxis_title="X",yaxis_title="Y",showlegend=False,
+                              dragmode="lasso",clickmode="event+select")
+        map_fig.update_yaxes(autorange="reversed",scaleanchor="x",scaleratio=1,constrain="domain")
+        map_event=st.plotly_chart(map_fig,use_container_width=True,on_select="rerun",
+                                  selection_mode=("points","box","lasso"),key="spatial_coordinate_map")
+        try:
+            selected_points=map_event.selection.points
+            picked_names=[]
+            for point in selected_points:
+                point_data=point.get("customdata")
+                picked_name=point_data[0] if isinstance(point_data,(list,tuple)) else point_data
+                if picked_name in names:
+                    picked_names.append(picked_name)
+            if picked_names:
                 mapped_names={s["name"] for s in mapped}
                 ordinary_selected=[n for n in st.session_state["graph_selected"] if n not in mapped_names]
-                st.session_state["graph_selected"]=list(dict.fromkeys([*ordinary_selected,picked_name]))
-                picked=next(s for s in map_specs if s["name"]==picked_name)
-                st.caption(f"선택 위치: X = {picked['mapping_coordinate'][0]:g}, Y = {picked['mapping_coordinate'][1]:g}")
-    except (AttributeError,KeyError,TypeError,IndexError):
-        pass
+                st.session_state["graph_selected"]=list(dict.fromkeys([*ordinary_selected,*picked_names]))
+                st.caption(f"선택한 좌표: {len(picked_names)}개")
+        except (AttributeError,KeyError,TypeError,IndexError):
+            pass
 
 def selection_label(name):
     spec=next((item for item in mapped if item["name"]==name),None)
@@ -511,7 +516,8 @@ def selection_label(name):
         return f"{short_stem} · X={coord[0]:g}, Y={coord[1]:g}"
     value=coord[0] if isinstance(coord,(tuple,list)) else coord
     return f"{short_stem} · 시간={value:g}"
-st.multiselect("그릴 스펙트럼 선택",names,key="graph_selected",format_func=selection_label,help="공간 맵에서 점을 클릭하거나 목록에서 좌표를 선택할 수 있습니다. 시간 매핑은 시간값으로 표시됩니다.")
+with st.sidebar:
+    st.multiselect("그릴 스펙트럼 선택",names,key="graph_selected",format_func=selection_label,help="공간 맵에서 점 하나 또는 여러 개를 선택할 수 있습니다. 시간 매핑은 시간값으로 표시됩니다.")
 tabs=st.tabs(["그래프 및 처리","피크 분석","내보내기"])
 with st.sidebar:
     st.header("처리")
