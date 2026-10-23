@@ -1,6 +1,6 @@
 """Streamlit port of the RSLAB spectrum 👨🏻‍🔬👩🏻‍🔬 (core workflow)."""
 from __future__ import annotations
-import ast, io, json, csv, re
+import ast, io, json, csv, re, zipfile
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -421,6 +421,49 @@ def state_json(series):
     for s in series:
         data.append({k:(v.tolist() if isinstance(v,np.ndarray) else v) for k,v in s.items()})
     return json.dumps(data,ensure_ascii=False)
+
+def export_curve_table(target_names, series, values_by_name):
+    """Keep each curve's original X/Y pairs intact in a convenient table."""
+    targets=[n for n in target_names if n in values_by_name]
+    if not targets:
+        return pd.DataFrame()
+    lookup={s["name"]:s for s in series}
+    first_x=np.asarray(lookup[targets[0]]["x"],dtype=float)
+    same_grid=all(
+        len(lookup[n]["x"])==len(first_x) and
+        np.allclose(np.asarray(lookup[n]["x"],dtype=float),first_x,rtol=0,atol=1e-10,equal_nan=True)
+        for n in targets[1:]
+    )
+    if same_grid:
+        data={"X":first_x}
+        for n in targets:
+            data[n]=np.asarray(values_by_name[n],dtype=float)
+        return pd.DataFrame(data)
+    data={}
+    for n in targets:
+        data[f"{n} | X"]=np.asarray(lookup[n]["x"],dtype=float)
+        data[f"{n} | Y"]=np.asarray(values_by_name[n],dtype=float)
+    return pd.DataFrame({key:pd.Series(value) for key,value in data.items()})
+
+def curve_archive(target_names, series, values_by_name, extension):
+    """Pack one exact X/Y data file per curve into a ZIP archive."""
+    lookup={s["name"]:s for s in series}
+    separator="\t" if extension=="txt" else ","
+    archive_buffer=io.BytesIO()
+    with zipfile.ZipFile(archive_buffer,"w",compression=zipfile.ZIP_DEFLATED) as archive:
+        used=set()
+        for index,name in enumerate(target_names,1):
+            if name not in values_by_name or name not in lookup:
+                continue
+            table=pd.DataFrame({"X":lookup[name]["x"],"Y":values_by_name[name]})
+            safe_name=re.sub(r'[\\/:*?"<>|]+',"_",str(name)).strip(" ._") or f"spectrum_{index}"
+            filename=f"{safe_name}.{extension}"
+            if filename in used:
+                filename=f"{safe_name}_{index}.{extension}"
+            used.add(filename)
+            content=table.to_csv(index=False,sep=separator).encode("utf-8-sig")
+            archive.writestr(filename,content)
+    return archive_buffer.getvalue()
 
 if "series" not in st.session_state: st.session_state.series=[]
 with st.sidebar:
@@ -856,15 +899,41 @@ with tabs[2]:
     png_data=render_png_fixed_size(figout,canvas_width_px,canvas_height_px,export_dpi); plt.close(figout)
     st.download_button(f"그래프 PNG ({canvas_width_px} × {canvas_height_px} px)",png_data,"spectrum.png","image/png")
     st.caption(f"플롯 박스: {plot_box_width} × {plot_box_height} px · 전체 PNG: {canvas_width_px} × {canvas_height_px} px · DPI: {export_dpi}")
-    rows=[]
-    for n in selected:
-        s=next(z for z in series if z["name"]==n)
-        rows.append(pd.DataFrame({"X":s["x"],n:proc[n]+auto[n]+style[n]["offset"]}))
-    merged=pd.concat(rows,axis=1) if rows else pd.DataFrame()
-    st.download_button("선택 곡선 데이터 CSV",merged.to_csv(index=False).encode("utf-8-sig"),"spectra_processed.csv","text/csv")
-    out=io.StringIO()
-    for n in selected:
-        s=next(z for z in series if z["name"]==n)
-        pd.DataFrame({"X":s["x"],"Y":proc[n]}).to_csv(out,index=False,sep="\t")
-        out.write("\n")
-    st.download_button("곡선별 처리 데이터 TXT",out.getvalue().encode("utf-8-sig"),"spectra_processed.txt","text/plain")
+    st.markdown("### 데이터 파일 저장")
+    st.caption("보정 데이터에는 현재 설정한 baseline 보정과 normalization을 적용합니다. 그래프의 수직 스택 오프셋은 저장하지 않습니다.")
+    selected_targets=[n for n in selected if n in names]
+    raw_values={s["name"]:np.asarray(s["raw"],dtype=float) for s in series}
+    corrected_values={n:np.asarray(proc[n],dtype=float) for n in names}
+
+    st.markdown("#### 선택 곡선 원본 데이터")
+    st.caption(f"선택된 곡선 {len(selected_targets)}개를 하나의 파일로 저장합니다.")
+    raw_selected_table=export_curve_table(selected_targets,series,raw_values)
+    c1,c2=st.columns(2)
+    c1.download_button("선택 곡선 원본 CSV",raw_selected_table.to_csv(index=False).encode("utf-8-sig"),
+                       "selected_spectra_original.csv","text/csv",disabled=not selected_targets,use_container_width=True)
+    c2.download_button("선택 곡선 원본 TXT",raw_selected_table.to_csv(index=False,sep="\t").encode("utf-8-sig"),
+                       "selected_spectra_original.txt","text/plain",disabled=not selected_targets,use_container_width=True)
+
+    st.markdown("#### 선택 곡선 보정 데이터")
+    corrected_selected_table=export_curve_table(selected_targets,series,corrected_values)
+    c1,c2=st.columns(2)
+    c1.download_button("선택 곡선 보정 CSV",corrected_selected_table.to_csv(index=False).encode("utf-8-sig"),
+                       "selected_spectra_corrected.csv","text/csv",disabled=not selected_targets,use_container_width=True)
+    c2.download_button("선택 곡선 보정 TXT",corrected_selected_table.to_csv(index=False,sep="\t").encode("utf-8-sig"),
+                       "selected_spectra_corrected.txt","text/plain",disabled=not selected_targets,use_container_width=True)
+
+    st.markdown("#### 곡선별 원본 데이터")
+    st.caption(f"전체 {len(names)}개 곡선을 각각 별도 파일로 저장합니다. 여러 파일은 ZIP으로 묶어 받습니다.")
+    c1,c2=st.columns(2)
+    c1.download_button("곡선별 원본 CSV ZIP",curve_archive(names,series,raw_values,"csv"),
+                       "spectra_original_csv.zip","application/zip",disabled=not names,use_container_width=True)
+    c2.download_button("곡선별 원본 TXT ZIP",curve_archive(names,series,raw_values,"txt"),
+                       "spectra_original_txt.zip","application/zip",disabled=not names,use_container_width=True)
+
+    st.markdown("#### 곡선별 보정 데이터")
+    st.caption("현재 처리 설정을 반영한 곡선을 각각 별도 파일로 저장합니다.")
+    c1,c2=st.columns(2)
+    c1.download_button("곡선별 보정 CSV ZIP",curve_archive(names,series,corrected_values,"csv"),
+                       "spectra_corrected_csv.zip","application/zip",disabled=not names,use_container_width=True)
+    c2.download_button("곡선별 보정 TXT ZIP",curve_archive(names,series,corrected_values,"txt"),
+                       "spectra_corrected_txt.zip","application/zip",disabled=not names,use_container_width=True)
