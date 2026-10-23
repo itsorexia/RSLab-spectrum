@@ -1,4 +1,4 @@
-"""Streamlit port of the RSLAB spectrum 👨🏻‍🔬👩🏻‍🔬 (core workflow)."""
+"""Streamlit port of the RSLAB spectrum viewer (core workflow)."""
 from __future__ import annotations
 import ast, io, json, csv, re, zipfile
 from pathlib import Path
@@ -14,8 +14,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks
 
-st.set_page_config(page_title="RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬", layout="wide")
-st.title("RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬")
+st.set_page_config(page_title="RSLAB Spectrum Viewer", layout="wide")
+st.title("RSLAB Spectrum Viewer")
 
 def read_text(upload):
     raw=upload.getvalue()
@@ -649,7 +649,7 @@ with tabs[0]:
                 dim_col1,dim_col2=st.columns(2)
                 inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
                 inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-            with st.expander("여백 설정",expanded=False):
+            with st.expander("> 여백 설정",expanded=False):
                 if set_plot_box:
                     st.markdown("**플롯 박스 위치 (px)**")
                     pos_col1,pos_col2=st.columns(2)
@@ -872,7 +872,7 @@ with tabs[1]:
             st.info("설정한 X 범위 안에 유효한 데이터가 없습니다.")
 
 with tabs[2]:
-    st.subheader("그래프와 데이터 저장")
+    st.subheader("그래프 저장")
     plt.rcParams["font.family"]=[font_family, "DejaVu Sans"]
     figout,axout=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
     apply_graph_frame(axout,show_graph_frame,graph_frame_width)
@@ -899,14 +899,12 @@ with tabs[2]:
     png_data=render_png_fixed_size(figout,canvas_width_px,canvas_height_px,export_dpi); plt.close(figout)
     st.download_button(f"그래프 PNG ({canvas_width_px} × {canvas_height_px} px)",png_data,"spectrum.png","image/png")
     st.caption(f"플롯 박스: {plot_box_width} × {plot_box_height} px · 전체 PNG: {canvas_width_px} × {canvas_height_px} px · DPI: {export_dpi}")
-    st.markdown("### 데이터 파일 저장")
-    st.caption("보정 데이터에는 현재 설정한 baseline 보정과 normalization을 적용합니다. 그래프의 수직 스택 오프셋은 저장하지 않습니다.")
+    st.subheader("데이터 파일 저장")
+    st.markdown("<style>div[data-testid='stDownloadButton'] button{max-width:350px !important;width:100% !important;}</style>",unsafe_allow_html=True)
     selected_targets=[n for n in selected if n in names]
     raw_values={s["name"]:np.asarray(s["raw"],dtype=float) for s in series}
     corrected_values={n:np.asarray(proc[n],dtype=float) for n in names}
 
-    st.markdown("#### 선택 곡선 원본 데이터")
-    st.caption(f"선택된 곡선 {len(selected_targets)}개를 하나의 파일로 저장합니다.")
     raw_selected_table=export_curve_table(selected_targets,series,raw_values)
     c1,c2=st.columns(2)
     c1.download_button("선택 곡선 원본 CSV",raw_selected_table.to_csv(index=False).encode("utf-8-sig"),
@@ -914,7 +912,7 @@ with tabs[2]:
     c2.download_button("선택 곡선 원본 TXT",raw_selected_table.to_csv(index=False,sep="\t").encode("utf-8-sig"),
                        "selected_spectra_original.txt","text/plain",disabled=not selected_targets,use_container_width=True)
 
-    st.markdown("#### 선택 곡선 보정 데이터")
+    st.divider()
     corrected_selected_table=export_curve_table(selected_targets,series,corrected_values)
     c1,c2=st.columns(2)
     c1.download_button("선택 곡선 보정 CSV",corrected_selected_table.to_csv(index=False).encode("utf-8-sig"),
@@ -922,16 +920,14 @@ with tabs[2]:
     c2.download_button("선택 곡선 보정 TXT",corrected_selected_table.to_csv(index=False,sep="\t").encode("utf-8-sig"),
                        "selected_spectra_corrected.txt","text/plain",disabled=not selected_targets,use_container_width=True)
 
-    st.markdown("#### 곡선별 원본 데이터")
-    st.caption(f"전체 {len(names)}개 곡선을 각각 별도 파일로 저장합니다. 여러 파일은 ZIP으로 묶어 받습니다.")
+    st.divider()
     c1,c2=st.columns(2)
     c1.download_button("곡선별 원본 CSV ZIP",curve_archive(names,series,raw_values,"csv"),
                        "spectra_original_csv.zip","application/zip",disabled=not names,use_container_width=True)
     c2.download_button("곡선별 원본 TXT ZIP",curve_archive(names,series,raw_values,"txt"),
                        "spectra_original_txt.zip","application/zip",disabled=not names,use_container_width=True)
 
-    st.markdown("#### 곡선별 보정 데이터")
-    st.caption("현재 처리 설정을 반영한 곡선을 각각 별도 파일로 저장합니다.")
+    st.divider()
     c1,c2=st.columns(2)
     c1.download_button("곡선별 보정 CSV ZIP",curve_archive(names,series,corrected_values,"csv"),
                        "spectra_corrected_csv.zip","application/zip",disabled=not names,use_container_width=True)
