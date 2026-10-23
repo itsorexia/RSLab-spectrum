@@ -1,4 +1,4 @@
-"""Streamlit port of the RSLAB spectrum 👨🏻‍🔬👩🏻‍🔬 (core workflow)."""
+"""Streamlit port of the RSLAB spectrum viewer (core workflow)."""
 from __future__ import annotations
 import ast, io, json, csv, re
 from pathlib import Path
@@ -14,8 +14,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks
 
-st.set_page_config(page_title="RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬", layout="wide")
-st.title("RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬")
+st.set_page_config(page_title="RSLAB Spectrum Viewer", layout="wide")
+st.title("RSLAB Spectrum Viewer")
 
 def read_text(upload):
     raw=upload.getvalue()
@@ -550,7 +550,7 @@ with tabs[0]:
     plot_col,settings_col=st.columns([2.2,1],gap="large")
     with settings_col:
         st.subheader("그래프 설정")
-        stack_tab,visual_tab,size_tab,axis_tab=st.tabs(["수직 스택","비주얼","크기·글꼴","축 설정"])
+        size_tab,axis_tab,stack_tab,visual_tab=st.tabs(["크기·글꼴","축 설정","수직 스택","비주얼"])
         with stack_tab:
             selected=st.session_state.get("graph_selected",names.copy())
             stack=st.checkbox("수직 스택 사용",False,key="graph_stack")
@@ -606,7 +606,7 @@ with tabs[0]:
                 dim_col1,dim_col2=st.columns(2)
                 inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
                 inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-            with st.expander("여백 설정",expanded=False):
+            with st.expander("> 여백 설정",expanded=False):
                 if set_plot_box:
                     st.markdown("**플롯 박스 위치 (px)**")
                     pos_col1,pos_col2=st.columns(2)
