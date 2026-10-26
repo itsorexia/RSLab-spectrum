@@ -422,6 +422,20 @@ def state_json(series):
         data.append({k:(v.tolist() if isinstance(v,np.ndarray) else v) for k,v in s.items()})
     return json.dumps(data,ensure_ascii=False)
 
+def make_series_names_unique(items, existing_names=()):
+    """Give every curve a unique key so per-curve arrays cannot overwrite each other."""
+    used=set(existing_names)
+    for item in items:
+        base=str(item.get("name") or "Spectrum")
+        candidate=base
+        suffix=2
+        while candidate in used:
+            candidate=f"{base} ({suffix})"
+            suffix+=1
+        item["name"]=candidate
+        used.add(candidate)
+    return items
+
 def export_curve_table(target_names, series, values_by_name):
     """Keep each curve's original X/Y pairs intact in a convenient table."""
     targets=[n for n in target_names if n in values_by_name]
@@ -466,6 +480,7 @@ def curve_archive(target_names, series, values_by_name, extension):
     return archive_buffer.getvalue()
 
 if "series" not in st.session_state: st.session_state.series=[]
+st.session_state.series=make_series_names_unique(st.session_state.series)
 with st.sidebar:
     st.header("데이터")
     uploads=st.file_uploader("CSV / TSV / TXT 파일",type=["csv","tsv","txt","dat","asc"],accept_multiple_files=True)
@@ -475,6 +490,7 @@ with st.sidebar:
         for f in uploads or []:
             try: loaded.extend(parse_upload(f))
             except Exception as e: errors.append(f"{f.name}: {e}")
+        loaded=make_series_names_unique(loaded,[s["name"] for s in st.session_state.series])
         st.session_state.series.extend(loaded)
         if loaded:
             selected_before=st.session_state.get("graph_selected",previous_names)
@@ -487,7 +503,11 @@ with st.sidebar:
         st.download_button("현재 세션 저장 (.json)",state_json(st.session_state.series),"rslab_session.json","application/json",use_container_width=True)
         session=st.file_uploader("세션 불러오기 (.json)",type="json",key="session_upload")
         if session and st.button("세션 적용"):
-            raw=json.loads(session.getvalue().decode("utf-8")); st.session_state.series=[{**s,"x":np.asarray(s["x"]),"raw":np.asarray(s["raw"])} for s in raw]; st.rerun()
+            raw=json.loads(session.getvalue().decode("utf-8"))
+            restored=[{**s,"x":np.asarray(s["x"]),"raw":np.asarray(s["raw"])} for s in raw]
+            st.session_state.series=make_series_names_unique(restored)
+            st.session_state["graph_selected"]=[s["name"] for s in st.session_state.series]
+            st.rerun()
     if st.session_state.series:
         parsed_names=[s["name"] for s in st.session_state.series]
         aliases=st.session_state.pop("graph_name_aliases",{})
