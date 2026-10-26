@@ -1,4 +1,4 @@
-"""Streamlit port of the RSLAB spectrum  (core workflow)."""
+"""Streamlit port of the RSLAB spectrum 👨🏻‍🔬👩🏻‍🔬 (core workflow)."""
 from __future__ import annotations
 import ast, io, json, csv, re, zipfile
 from pathlib import Path
@@ -14,8 +14,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks, savgol_filter
 
-st.set_page_config(page_title="RSLAB Spectrum ", layout="wide")
-st.title("RSLAB Spectrum ")
+st.set_page_config(page_title="RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬", layout="wide")
+st.title("RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬")
 
 def read_text(upload):
     raw=upload.getvalue()
@@ -885,7 +885,7 @@ with tabs[1]:
             st.download_button("피크 결과 CSV",peak_df.to_csv(index=False).encode("utf-8-sig"),"peaks.csv","text/csv")
     with max_tab:
         st.subheader("선택 곡선의 최대 intensity")
-        st.caption("Raman 데이터는 AsLS 보정 후, UV–Vis 데이터는 원본 intensity에서 최대값을 계산합니다.")
+        st.caption("왼쪽 처리 설정의 SG 필터, baseline 보정, normalization 결과에서 최대값을 계산합니다.")
         max_targets=st.multiselect("최대값을 계산할 곡선",names,default=[n for n in selected if n in names],key="max_targets")
         use_graph_range=st.checkbox("현재 그래프 X 범위 사용",value=True,key="max_use_graph_range")
         if use_graph_range:
@@ -902,19 +902,24 @@ with tabs[1]:
         max_rows=[]
         for max_name in max_targets:
             max_s=next(z for z in series if z["name"]==max_name)
-            max_y=max_s["raw"].copy()
             is_uv=max_s.get("x_label")=="Wavelength (nm)"
-            if not is_uv and len(max_y)>=3:
-                max_y=baseline(max_y,"AsLS",degree,lam,p,iterations)
+            max_y=np.asarray(proc[max_name],dtype=float)
             mask=np.isfinite(max_s["x"]) & np.isfinite(max_y) & (max_s["x"]>=max_xmin) & (max_s["x"]<=max_xmax)
             if np.any(mask):
                 valid_indices=np.flatnonzero(mask)
                 source_idx=int(valid_indices[int(np.nanargmax(max_y[mask]))])
+                processing_steps=[]
+                if sg_enabled:
+                    processing_steps.append(f"SG (window={sg_window}, order={sg_polyorder})")
+                if baseline_method!="없음":
+                    processing_steps.append(f"{baseline_method} baseline")
+                if normalization!="없음":
+                    processing_steps.append(f"{normalization} normalization")
                 max_rows.append({
                     "곡선":max_name,
                     "최대 X (nm)" if is_uv else "최대 X (cm⁻¹)":float(max_s["x"][source_idx]),
                     "최대 intensity":float(max_y[source_idx]),
-                    "처리": "원본 (UV–Vis)" if is_uv else f"AsLS (λ={lam:g}, p={p:g}, 반복={iterations})",
+                    "처리": " → ".join(processing_steps) if processing_steps else "원본",
                 })
         if max_rows:
             max_df=pd.DataFrame(max_rows)
