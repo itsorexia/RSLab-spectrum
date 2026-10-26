@@ -1,4 +1,4 @@
-"""Streamlit port of the RSLAB spectrum 👨🏻‍🔬👩🏻‍🔬 (core workflow)."""
+"""Streamlit port of the RSLAB spectrum  (core workflow)."""
 from __future__ import annotations
 import ast, io, json, csv, re, zipfile
 from pathlib import Path
@@ -12,10 +12,10 @@ from matplotlib.colors import to_hex
 from matplotlib.ticker import MultipleLocator, FuncFormatter
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, savgol_filter
 
-st.set_page_config(page_title="RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬", layout="wide")
-st.title("RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬")
+st.set_page_config(page_title="RSLAB Spectrum ", layout="wide")
+st.title("RSLAB Spectrum ")
 
 def read_text(upload):
     raw=upload.getvalue()
@@ -200,7 +200,16 @@ def baseline(y, method, degree, lam, p, iterations):
     return y.copy()
 
 def transform(s, opts):
-    y=baseline(s["raw"],opts["baseline"],opts["degree"],opts["lam"],opts["p"],opts["iterations"])
+    y=np.asarray(s["raw"],dtype=float).copy()
+    if opts.get("sg_enabled") and len(y)>=3:
+        window=int(opts["sg_window"])
+        if window%2==0:
+            window-=1
+        window=min(window,len(y) if len(y)%2 else len(y)-1)
+        polyorder=min(int(opts["sg_polyorder"]),window-1)
+        if window>=3:
+            y=savgol_filter(y,window,polyorder)
+    y=baseline(y,opts["baseline"],opts["degree"],opts["lam"],opts["p"],opts["iterations"])
     mode=opts["normalization"]
     if mode=="Min-max":
         lo,hi=np.nanmin(y),np.nanmax(y); y=(y-lo)/(hi-lo) if hi!=lo else y*0
@@ -584,29 +593,52 @@ with st.sidebar:
 tabs=st.tabs(["그래프 및 처리","피크 분석","내보내기"])
 with st.sidebar:
     st.header("처리")
-    normalization_enabled=st.checkbox("Normalization 적용",value=False,key="normalization_enabled")
-    if normalization_enabled:
-        normalization=st.selectbox("Normalization 종류",["Min-max","Maximum","Custom divisor"],key="normalization_method")
-        divisor=st.number_input("사용자 나눗수",value=1.0,format="%.6g",key="normalization_divisor") if normalization=="Custom divisor" else 1.0
-    else:
-        normalization="없음"
-        divisor=1.0
-
-    baseline_enabled=st.checkbox("Baseline 적용",value=False,key="baseline_enabled")
-    if baseline_enabled:
-        baseline_method=st.selectbox("Baseline 종류",["AsLS","Polynomial"],key="baseline_method")
-        if baseline_method=="Polynomial":
-            degree=st.number_input("Polynomial 차수",1,10,2,key="baseline_degree")
-            lam,p,iterations=100000.0,0.0001,10
+    normalization_tab,baseline_tab,smoothing_tab=st.tabs(["Normalization","Baseline","SG 필터"])
+    with normalization_tab:
+        normalization_enabled=st.checkbox("Normalization 적용",value=False,key="normalization_enabled")
+        if normalization_enabled:
+            normalization=st.selectbox("Normalization 종류",["Min-max","Maximum","Custom divisor"],key="normalization_method")
+            divisor=st.number_input("사용자 나눗수",value=1.0,format="%.6g",key="normalization_divisor") if normalization=="Custom divisor" else 1.0
         else:
-            degree=2
-            lam=st.number_input("AsLS λ",min_value=1.0,value=100000.0,format="%.1f",key="baseline_lambda")
-            p=st.number_input("AsLS p",min_value=0.000001,max_value=0.5,value=0.0001,format="%.6f",key="baseline_p")
-            iterations=st.number_input("반복 횟수",1,200,10,key="baseline_iterations")
-    else:
-        baseline_method="없음"
-        degree,lam,p,iterations=2,100000.0,0.0001,10
-    opts={"normalization":normalization,"divisor":divisor,"baseline":baseline_method,"degree":degree,"lam":lam,"p":p,"iterations":iterations}
+            normalization="없음"
+            divisor=1.0
+    with baseline_tab:
+        baseline_enabled=st.checkbox("Baseline 적용",value=False,key="baseline_enabled")
+        if baseline_enabled:
+            baseline_method=st.selectbox("Baseline 종류",["AsLS","Polynomial"],key="baseline_method")
+            if baseline_method=="Polynomial":
+                degree=st.number_input("Polynomial 차수",1,10,2,key="baseline_degree")
+                lam,p,iterations=100000.0,0.0001,10
+            else:
+                degree=2
+                lam=st.number_input("AsLS λ",min_value=1.0,value=100000.0,format="%.1f",key="baseline_lambda")
+                p=st.number_input("AsLS p",min_value=0.000001,max_value=0.5,value=0.0001,format="%.6f",key="baseline_p")
+                iterations=st.number_input("반복 횟수",1,200,10,key="baseline_iterations")
+        else:
+            baseline_method="없음"
+            degree,lam,p,iterations=2,100000.0,0.0001,10
+    with smoothing_tab:
+        min_curve_points=min(len(np.asarray(s["raw"]).reshape(-1)) for s in series)
+        max_sg_window=min_curve_points if min_curve_points%2 else min_curve_points-1
+        sg_enabled=st.checkbox("Savitzky–Golay 필터 적용",value=False,key="sg_enabled",disabled=max_sg_window<3)
+        sg_window,sg_polyorder=11,3
+        if max_sg_window<3:
+            st.warning("필터를 적용하려면 각 곡선에 데이터 점이 3개 이상 필요합니다.")
+            sg_enabled=False
+        elif sg_enabled:
+            default_window=min(11,max_sg_window)
+            sg_window=st.number_input("Window length (홀수)",min_value=3,max_value=max_sg_window,
+                                      value=default_window,step=2,key="sg_window_length",
+                                      help="값이 클수록 더 넓은 구간을 평활화합니다.")
+            if sg_window%2==0:
+                sg_window=sg_window+1 if sg_window<max_sg_window else sg_window-1
+                st.caption(f"Window length는 홀수여야 해서 {sg_window}를 적용합니다.")
+            sg_polyorder=st.number_input("Polynomial order",min_value=1,max_value=max(1,sg_window-1),
+                                         value=min(3,sg_window-1),step=1,key="sg_polyorder",
+                                         help="Window length보다 작은 차수를 선택하세요.")
+        st.caption("처리 순서: SG 평활화 → baseline 보정 → normalization")
+    opts={"normalization":normalization,"divisor":divisor,"baseline":baseline_method,"degree":degree,"lam":lam,"p":p,"iterations":iterations,
+          "sg_enabled":sg_enabled,"sg_window":sg_window,"sg_polyorder":sg_polyorder}
 
 style={}
 with tabs[0]:
