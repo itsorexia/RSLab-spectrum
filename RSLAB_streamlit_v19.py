@@ -958,7 +958,7 @@ with tabs[0]:
         st.caption(f"곡선 {len(series)}개 · 원본 데이터는 전체 해상도로 분석/내보내기합니다.")
 
 with tabs[1]:
-    peak_tab,max_tab=st.tabs(["피크 찾기","맥스 인텐시티"])
+    peak_tab,max_tab,range_stats_tab=st.tabs(["피크 찾기","맥스 인텐시티","범위 통계"])
     with peak_tab:
         st.subheader("피크 찾기")
         target=st.selectbox("분석 곡선",names,key="peak_series")
@@ -1045,6 +1045,58 @@ with tabs[1]:
             st.download_button("최대값 결과 CSV",max_df.to_csv(index=False).encode("utf-8-sig"),"max_intensity_summary.csv","text/csv")
         elif max_targets:
             st.info("설정한 X 범위 안에 유효한 데이터가 없습니다.")
+
+    with range_stats_tab:
+        st.subheader("X 범위 내 평균 및 표준편차")
+        st.caption("선택한 X 범위에 실제로 포함되는 데이터 포인트만 사용합니다. 현재 처리 설정 또는 원본 intensity를 기준으로 계산할 수 있습니다.")
+        axis_labels=list(dict.fromkeys(str(s.get("x_label","X")) for s in series))
+        stats_axis=st.selectbox("X축 종류",axis_labels,key="range_stats_axis")
+        axis_series=[s for s in series if str(s.get("x_label","X"))==stats_axis]
+        axis_names=[s["name"] for s in axis_series]
+        default_stats=[n for n in selected if n in axis_names] or axis_names
+        stats_targets=st.multiselect("계산할 곡선",axis_names,default=default_stats,key="range_stats_targets")
+        if stats_targets:
+            selected_stats=[s for s in axis_series if s["name"] in stats_targets]
+            range_min=min(float(np.nanmin(s["x"])) for s in selected_stats)
+            range_max=max(float(np.nanmax(s["x"])) for s in selected_stats)
+        else:
+            range_min=min(float(np.nanmin(s["x"])) for s in axis_series)
+            range_max=max(float(np.nanmax(s["x"])) for s in axis_series)
+        range_cols=st.columns(2)
+        stats_xmin=range_cols[0].number_input("X 범위 최소",value=range_min,format="%.8g",key="range_stats_xmin")
+        stats_xmax=range_cols[1].number_input("X 범위 최대",value=range_max,format="%.8g",key="range_stats_xmax")
+        basis_col,std_col=st.columns(2)
+        stats_basis=basis_col.radio("계산할 Y값",["현재 처리 결과","원본 intensity"],horizontal=True,key="range_stats_basis")
+        std_kind=std_col.radio("표준편차 계산",["표본 (n−1)","모집단 (n)"],horizontal=True,key="range_stats_std_kind",
+                               help="표본 표준편차는 n−1, 모집단 표준편차는 n으로 나눕니다.")
+        if stats_xmin>stats_xmax:
+            st.error("X 범위 최소값은 최대값보다 작아야 합니다.")
+        elif not stats_targets:
+            st.info("계산할 곡선을 선택하세요.")
+        else:
+            rows=[]
+            for stats_name in stats_targets:
+                stats_curve=next(s for s in axis_series if s["name"]==stats_name)
+                y_stats=np.asarray(proc[stats_name] if stats_basis=="현재 처리 결과" else stats_curve["raw"],dtype=float)
+                x_stats=np.asarray(stats_curve["x"],dtype=float)
+                mask=np.isfinite(x_stats)&np.isfinite(y_stats)&(x_stats>=stats_xmin)&(x_stats<=stats_xmax)
+                values=y_stats[mask]
+                if len(values):
+                    ddof=1 if std_kind=="표본 (n−1)" else 0
+                    std_value=float(np.std(values,ddof=ddof)) if len(values)>ddof else np.nan
+                    rows.append({"곡선":stats_name,"X축":stats_axis,"범위 최소":float(stats_xmin),
+                                 "범위 최대":float(stats_xmax),"포인트 수":int(len(values)),
+                                 "평균":float(np.mean(values)),"표준편차":std_value,"Y 기준":stats_basis,
+                                 "표준편차 방식":std_kind})
+            if rows:
+                stats_df=pd.DataFrame(rows)
+                st.dataframe(stats_df,use_container_width=True,hide_index=True)
+                st.download_button("범위 통계 CSV 저장",stats_df.to_csv(index=False).encode("utf-8-sig"),
+                                   "range_statistics.csv","text/csv",key="range_stats_download")
+                if any(row["포인트 수"]==1 for row in rows) and std_kind=="표본 (n−1)":
+                    st.caption("포인트가 1개인 곡선은 표본 표준편차를 계산할 수 없어 NaN으로 표시됩니다.")
+            else:
+                st.info("입력한 X 범위 안에 유효한 데이터가 없습니다.")
 
 with tabs[2]:
     st.subheader("그래프 저장")
