@@ -878,8 +878,8 @@ with tabs[0]:
                 if set_plot_box:
                     st.markdown("**플롯 박스 위치 (px)**")
                     pos_col1,pos_col2=st.columns(2)
-                    margin_left=pos_col1.number_input("왼쪽 위치",min_value=0,max_value=2000,value=65,step=5,key="graph_margin_left")
-                    margin_bottom=pos_col2.number_input("아래쪽 위치",min_value=0,max_value=2000,value=50,step=5,key="graph_margin_bottom")
+                    margin_left=pos_col1.number_input("왼쪽 위치",min_value=0,max_value=2000,value=90,step=5,key="graph_margin_left")
+                    margin_bottom=pos_col2.number_input("아래쪽 위치",min_value=0,max_value=2000,value=60,step=5,key="graph_margin_bottom")
                     max_inner_width=max(1,canvas_width_px-int(margin_left)-1)
                     max_inner_height=max(1,canvas_height_px-int(margin_bottom)-1)
                     if inner_width>max_inner_width or inner_height>max_inner_height:
@@ -895,7 +895,7 @@ with tabs[0]:
                 else:
                     m1,m2=st.columns(2)
                     margin_left=m1.number_input("왼쪽 여백",min_value=0,max_value=2000,value=90,step=5,key="graph_margin_left")
-                    margin_right=m2.number_input("오른쪽 여백",min_value=0,max_value=2000,value=20,step=5,key="graph_margin_right")
+                    margin_right=m2.number_input("오른쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_right")
                     m3,m4=st.columns(2)
                     margin_top=m3.number_input("위쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_top")
                     margin_bottom=m4.number_input("아래쪽 여백",min_value=0,max_value=2000,value=60,step=5,key="graph_margin_bottom")
