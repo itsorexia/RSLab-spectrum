@@ -24,11 +24,66 @@ def read_text(upload):
         except UnicodeDecodeError: pass
     return raw.decode("utf-8", errors="replace")
 
+def choose_x_column(df):
+    """Infer the spectral X column from its header and numeric shape."""
+    if df is None or df.shape[1] < 2:
+        raise ValueError("X/Y로 판단할 컬럼이 2개 이상 필요합니다.")
+    headers=[str(c).strip().lower() for c in df.columns]
+    x_hints=("raman shift","wavenumber","wave number","wavelength","lambda",
+             "spectral axis","x-axis","x axis","xcoordinate","x coordinate","x (","cm-1","cm⁻¹")
+    y_hints=("intensity","absorbance","counts","signal","fluorescence","y-axis","y axis")
+    explicit=[]
+    for i,h in enumerate(headers):
+        compact=re.sub(r"[^a-z0-9µ⁻]","",h)
+        if any(token in h for token in x_hints) or compact in {"x","xnm","ramanshift","wavelengthnm","nm","cm1"}:
+            if not any(token in h for token in y_hints):
+                explicit.append(i)
+    if explicit:
+        xi=explicit[0]
+    else:
+        scores=[]
+        for i in range(df.shape[1]):
+            values=pd.to_numeric(df.iloc[:,i].astype(str).str.replace(",","",regex=False),errors="coerce").to_numpy(float)
+            good=values[np.isfinite(values)]
+            if len(good)<2:
+                scores.append((-1.0,i)); continue
+            coverage=len(good)/max(1,len(values))
+            diffs=np.diff(good)
+            nonzero=diffs[np.isfinite(diffs)&(diffs!=0)]
+            unique=len(np.unique(good))/len(good)
+            if len(diffs):
+                monotonic=max(np.mean(diffs>0),np.mean(diffs<0))
+            else:
+                monotonic=0.0
+            if len(nonzero)>=2 and np.mean(np.abs(nonzero))>0:
+                cv=float(np.std(np.abs(nonzero))/np.mean(np.abs(nonzero)))
+                regularity=1.0/(1.0+cv)
+            else:
+                regularity=0.0
+            header_penalty=0.35 if any(token in headers[i] for token in y_hints) else 0.0
+            score=0.38*coverage+0.30*monotonic+0.22*unique+0.10*regularity-header_penalty
+            scores.append((score,i))
+        xi=max(scores)[1]
+        best=max(scores)[0]
+        # Avoid silently treating arbitrary values as an axis when none looks like one.
+        if best<0.55:
+            raise ValueError("X축 컬럼을 판단하지 못했습니다. 컬럼명에 X, Wavelength, Raman Shift 등을 표시해 주세요.")
+    header=headers[xi]
+    if any(token in header for token in ("wavelength","lambda","nm")):
+        label="Wavelength (nm)"
+    elif any(token in header for token in ("raman","shift","wavenumber","wave number","cm-1","cm⁻¹")):
+        label="Raman Shift (cm⁻¹)"
+    elif header.strip() in {"x","x-axis","x axis"}:
+        label="X"
+    else:
+        label=str(df.columns[xi])
+    return xi,label
+
 def parse_upload(upload):
     """Parse ordinary tables and files containing repeated spectrum blocks."""
     text=read_text(upload)
     lines=text.splitlines()
-    x_terms=("wavelength","raman","shift","wavenumber","wave number","cm-1","cm⁻¹")
+    x_terms=("wavelength","raman","shift","wavenumber","wave number","cm-1","cm⁻¹","x-axis","x axis")
     header_rows=[]
     for i,line in enumerate(lines):
         low=line.lower()
@@ -144,10 +199,8 @@ def parse_upload(upload):
             df=df.dropna(axis=1,how="all").dropna(axis=0,how="all")
             if len(df.columns)<2:
                 continue
-            norm=[str(c).strip().lower() for c in df.columns]
-            xi=next((j for j,n in enumerate(norm) if any(k in n for k in ("raman","shift","wavelength","lambda","nm","x"))),0)
+            xi,x_label=choose_x_column(df)
             x=pd.to_numeric(df.iloc[:,xi].astype(str).str.replace(",","",regex=False),errors="coerce")
-            x_label="Wavelength (nm)" if any(k in norm[xi] for k in ("wavelength","nm")) else "Raman Shift (cm⁻¹)"
             y_columns=[j for j in range(len(df.columns)) if j!=xi]
             for j in y_columns:
                 y=pd.to_numeric(df.iloc[:,j].astype(str).str.replace(",","",regex=False),errors="coerce")
@@ -168,10 +221,8 @@ def parse_upload(upload):
             df=pd.read_csv(io.StringIO(text),header=None,sep=None,engine="python",comment="#",on_bad_lines="skip")
         df=df.dropna(axis=1,how="all").dropna(axis=0,how="all")
         if len(df.columns)>=2:
-            norm=[str(c).strip().lower() for c in df.columns]
-            xi=next((j for j,n in enumerate(norm) if any(k in n for k in ("raman","shift","wavelength","lambda","nm","x"))),0)
+            xi,x_label=choose_x_column(df)
             x=pd.to_numeric(df.iloc[:,xi].astype(str).str.replace(",","",regex=False),errors="coerce")
-            x_label="Wavelength (nm)" if any(k in norm[xi] for k in ("wavelength","nm")) else "Raman Shift (cm⁻¹)"
             y_columns=[j for j in range(len(df.columns)) if j!=xi]
             for j in y_columns:
                 y=pd.to_numeric(df.iloc[:,j].astype(str).str.replace(",","",regex=False),errors="coerce")
@@ -454,7 +505,7 @@ def export_curve_table(target_names, series, values_by_name):
     first_x=np.asarray(lookup[targets[0]]["x"],dtype=float)
     same_grid=all(
         len(lookup[n]["x"])==len(first_x) and
-        np.allclose(np.asarray(lookup[n]["x"],dtype=float),first_x,rtol=0,atol=1e-10,equal_nan=True)
+        np.array_equal(np.asarray(lookup[n]["x"],dtype=float),first_x,equal_nan=True)
         for n in targets[1:]
     )
     if same_grid:
@@ -490,6 +541,35 @@ def curve_archive(target_names, series, values_by_name, extension):
 
 if "series" not in st.session_state: st.session_state.series=[]
 st.session_state.series=make_series_names_unique(st.session_state.series)
+
+def render_blank_spectrum(prefix):
+    """Render an empty editable X/Y sheet and add it as a graphable curve."""
+    st.caption("표의 + 버튼으로 행을 추가하고 X와 Y 값을 입력한 뒤 그래프에 추가하세요.")
+    new_name=st.text_input("곡선 이름",value="새 스펙트럼",key=f"{prefix}_name")
+    label1,label2=st.columns(2)
+    x_label=label1.text_input("X축 이름",value="X",key=f"{prefix}_xlabel")
+    y_label=label2.text_input("Y축 이름",value="Intensity",key=f"{prefix}_ylabel")
+    empty=pd.DataFrame(columns=["X","Y"])
+    edited=st.data_editor(empty,num_rows="dynamic",use_container_width=True,
+                          hide_index=True,key=f"{prefix}_table",
+                          column_config={"X":st.column_config.NumberColumn("X",format="%.8g"),
+                                         "Y":st.column_config.NumberColumn("Y",format="%.8g")})
+    if st.button("입력한 데이터로 그래프 그리기",type="primary",key=f"{prefix}_add"):
+        x=pd.to_numeric(edited.get("X",pd.Series(dtype=float)),errors="coerce")
+        y=pd.to_numeric(edited.get("Y",pd.Series(dtype=float)),errors="coerce")
+        valid=x.notna() & y.notna()
+        if int(valid.sum())<2:
+            st.error("그래프를 그리려면 숫자로 된 X/Y 쌍을 2개 이상 입력하세요.")
+        else:
+            item={"name":str(new_name).strip() or "새 스펙트럼",
+                  "x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
+                  "x_label":str(x_label).strip() or "X","y_label":str(y_label).strip() or "Y"}
+            existing=[s["name"] for s in st.session_state.series]
+            st.session_state.series=make_series_names_unique([*st.session_state.series,item])
+            added_name=st.session_state.series[-1]["name"]
+            st.session_state["graph_selected"]=list(dict.fromkeys([*st.session_state.get("graph_selected",[]),added_name]))
+            st.rerun()
+
 with st.sidebar:
     st.header("데이터")
     uploads=st.file_uploader("CSV / TSV / TXT 파일",type=["csv","tsv","txt","dat","asc"],accept_multiple_files=True)
@@ -532,10 +612,48 @@ with st.sidebar:
         mapped=[s for s in st.session_state.series if s.get("mapping_type") in ("time","space")]
 
 if not st.session_state.series:
-    st.info("왼쪽에서 데이터를 불러오세요. 첫 번째 숫자 열을 X축으로 보고 나머지 숫자 열을 각각 곡선으로 추가합니다.")
+    st.info("왼쪽에서 파일을 불러오거나 아래 빈 스프레드시트에 직접 데이터를 입력하세요.")
+    st.subheader("빈 스프레드시트")
+    render_blank_spectrum("blank_start")
     st.stop()
 series=st.session_state.series
 names=[s["name"] for s in series]
+
+@st.dialog("스프레드시트 편집",width="large")
+def show_curve_editor():
+    curve_name=st.session_state.get("curve_editor_name")
+    curve=next((item for item in st.session_state.series if item["name"]==curve_name),None)
+    if curve is None:
+        st.warning("편집할 곡선을 찾을 수 없습니다.")
+        return
+    st.caption(f"{curve_name}의 X/Y 데이터를 편집합니다. 빈 행은 저장할 때 제외됩니다.")
+    edit_key=st.session_state.get("curve_editor_table_key","curve_editor_table")
+    edited=st.data_editor(st.session_state.get("curve_editor_table_data",pd.DataFrame()),
+                          num_rows="dynamic",use_container_width=True,hide_index=True,key=edit_key,
+                          column_config={"X":st.column_config.NumberColumn("X",format="%.8g"),
+                                         "Y":st.column_config.NumberColumn("Y",format="%.8g")})
+    apply_col,close_col=st.columns(2)
+    if apply_col.button("수정 내용 적용",type="primary",key="curve_editor_apply"):
+        x=pd.to_numeric(edited.get("X",pd.Series(dtype=float)),errors="coerce")
+        y=pd.to_numeric(edited.get("Y",pd.Series(dtype=float)),errors="coerce")
+        valid=x.notna() & y.notna()
+        if int(valid.sum())<2:
+            st.error("그래프 데이터는 숫자로 된 X/Y 쌍이 2개 이상 필요합니다.")
+        else:
+            curve["x"]=x[valid].to_numpy(float)
+            curve["raw"]=y[valid].to_numpy(float)
+            curve.pop("mapping_type",None)
+            curve.pop("mapping_coordinate",None)
+            curve.pop("mapping_source",None)
+            st.session_state.series=st.session_state.series
+            st.session_state["curve_editor_open"]=False
+            st.rerun()
+    if close_col.button("닫기",key="curve_editor_close"):
+        st.session_state["curve_editor_open"]=False
+        st.rerun()
+
+if st.session_state.get("curve_editor_open"):
+    show_curve_editor()
 mapped=[s for s in series if s.get("mapping_type") in ("time","space")]
 spatial=[s for s in mapped if s.get("mapping_type")=="space" and isinstance(s.get("mapping_coordinate"),(tuple,list)) and len(s["mapping_coordinate"])>=2]
 with st.sidebar:
@@ -590,7 +708,7 @@ def selection_label(name):
     return f"{short_stem} · 시간={value:g}"
 with st.sidebar:
     st.multiselect("그릴 스펙트럼 선택",names,key="graph_selected",format_func=selection_label,help="공간 맵에서 점 하나 또는 여러 개를 선택할 수 있습니다. 시간 매핑은 시간값으로 표시됩니다.")
-tabs=st.tabs(["그래프 및 처리","피크 분석","내보내기"])
+tabs=st.tabs(["그래프 및 처리","피크 분석","내보내기","데이터 시트"])
 with st.sidebar:
     st.header("처리")
     normalization_tab,baseline_tab,smoothing_tab=st.tabs(["Normalization","Baseline","SG 필터"])
@@ -990,3 +1108,24 @@ with tabs[2]:
                        "spectra_corrected_csv.zip","application/zip",disabled=not names,use_container_width=True)
     c2.download_button("곡선별 보정 TXT ZIP",curve_archive(names,series,corrected_values,"txt"),
                        "spectra_corrected_txt.zip","application/zip",disabled=not names,use_container_width=True)
+
+with tabs[3]:
+    st.subheader("불러온 데이터 편집")
+    st.caption("곡선을 선택하고 편집 창을 열면 X/Y 값을 스프레드시트처럼 수정할 수 있습니다. 수정한 값은 그래프와 내보내기에 반영됩니다.")
+    edit_names=[s["name"] for s in st.session_state.series]
+    selected_curve=st.selectbox("편집할 곡선",edit_names,key="sheet_curve_select")
+    if st.button("선택 곡선 스프레드시트 편집 창 열기",key="open_curve_editor"):
+        curve=next(s for s in st.session_state.series if s["name"]==selected_curve)
+        st.session_state["curve_editor_name"]=selected_curve
+        st.session_state["curve_editor_table_data"]=pd.DataFrame({
+            "X":np.asarray(curve["x"],dtype=float),
+            "Y":np.asarray(curve["raw"],dtype=float),
+        })
+        st.session_state["curve_editor_table_key"]=f"curve_editor_table_{edit_names.index(selected_curve)}_{st.session_state.get('curve_editor_revision',0)}"
+        st.session_state["curve_editor_revision"]=st.session_state.get("curve_editor_revision",0)+1
+        st.session_state["curve_editor_open"]=True
+        st.rerun()
+    st.divider()
+    st.subheader("빈 스프레드시트")
+    st.caption("새 데이터도 아래 표에 입력한 뒤 그래프에 추가할 수 있습니다.")
+    render_blank_spectrum("blank_tab")
