@@ -543,31 +543,86 @@ if "series" not in st.session_state: st.session_state.series=[]
 st.session_state.series=make_series_names_unique(st.session_state.series)
 
 def render_blank_spectrum(prefix):
-    """Render an empty editable X/Y sheet and add it as a graphable curve."""
-    st.caption("표의 + 버튼으로 행을 추가하고 X와 Y 값을 입력한 뒤 그래프에 추가하세요.")
+    """Render an editable sheet with reliable multi-cell clipboard paste."""
+    st.caption("표에 직접 입력하거나, 엑셀에서 복사한 표를 아래 붙여넣기 칸에 붙여넣고 표로 불러오세요.")
     new_name=st.text_input("곡선 이름",value="새 스펙트럼",key=f"{prefix}_name")
+    paste_text=st.text_area("복사한 표 붙여넣기 (첫 번째 열=X, 나머지 열=Y)",
+                            placeholder="엑셀에서 여러 셀을 복사해 여기에 붙여넣으세요. 탭은 열, 줄바꿈은 행으로 나뉩니다.",
+                            height=120,key=f"{prefix}_paste_text")
+    if st.button("붙여넣은 내용을 표에 펼치기",key=f"{prefix}_paste_apply"):
+        try:
+            delimiter="\t" if "\t" in paste_text else ("," if "," in paste_text else ";")
+            pasted=pd.read_csv(io.StringIO(paste_text),sep=delimiter,header=None,engine="python",dtype=str,skip_blank_lines=True)
+            pasted=pasted.dropna(axis=1,how="all").dropna(axis=0,how="all").reset_index(drop=True)
+            if pasted.shape[1]<2 or pasted.empty:
+                raise ValueError("X 열과 Y 열이 포함된 표를 붙여넣어 주세요.")
+            header_values=[str(v).strip() for v in pasted.iloc[0].tolist()]
+            first_x=pd.to_numeric(pd.Series([header_values[0].replace(",","")]),errors="coerce").iloc[0]
+            second_x=(pd.to_numeric(pd.Series([str(pasted.iloc[1,0]).replace(",","")]),errors="coerce").iloc[0]
+                      if len(pasted)>1 else np.nan)
+            has_header=pd.isna(first_x) and pd.notna(second_x)
+            if has_header:
+                pasted=pasted.iloc[1:].reset_index(drop=True)
+                x_header=header_values[0] or "X"
+                y_headers=header_values[1:]
+            else:
+                x_header="X"
+                y_headers=[]
+            columns=["X"]
+            for i in range(1,pasted.shape[1]):
+                candidate=(y_headers[i-1] if i-1<len(y_headers) else "")
+                columns.append(candidate or ("Y" if i==1 else f"Y{i}"))
+            # Keep pasted header labels unique so every intensity column remains editable.
+            seen=set()
+            for i,label in enumerate(columns):
+                base=label
+                suffix=2
+                while label in seen:
+                    label=f"{base} ({suffix})"
+                    suffix+=1
+                columns[i]=label
+                seen.add(label)
+            pasted.columns=columns
+            for col in pasted.columns:
+                pasted[col]=pd.to_numeric(pasted[col].astype(str).str.replace(",","",regex=False),errors="coerce")
+            pasted=pasted.dropna(axis=0,how="all").reset_index(drop=True)
+            if len(pasted)<2:
+                raise ValueError("숫자 데이터 행이 2개 이상 필요합니다.")
+            st.session_state[f"{prefix}_paste_data"]=pasted
+            st.session_state[f"{prefix}_paste_revision"]=st.session_state.get(f"{prefix}_paste_revision",0)+1
+            st.session_state[f"{prefix}_xlabel"]=x_header
+            st.success(f"{len(pasted)}행, {len(columns)}열을 표에 펼쳤습니다.")
+        except Exception as e:
+            st.error(f"표를 읽을 수 없습니다: {e}")
     label1,label2=st.columns(2)
     x_label=label1.text_input("X축 이름",value="X",key=f"{prefix}_xlabel")
     y_label=label2.text_input("Y축 이름",value="Intensity",key=f"{prefix}_ylabel")
     empty=pd.DataFrame(columns=["X","Y"])
-    edited=st.data_editor(empty,num_rows="dynamic",use_container_width=True,
-                          hide_index=True,key=f"{prefix}_table",
-                          column_config={"X":st.column_config.NumberColumn("X",format="%.8g"),
-                                         "Y":st.column_config.NumberColumn("Y",format="%.8g")})
+    table_key=f"{prefix}_table_{st.session_state.get(f'{prefix}_paste_revision',0)}"
+    sheet_data=st.session_state.get(f"{prefix}_paste_data",empty)
+    config={col:st.column_config.NumberColumn(str(col),format="%.8g") for col in sheet_data.columns}
+    edited=st.data_editor(sheet_data,num_rows="dynamic",use_container_width=True,
+                          hide_index=True,key=table_key,column_config=config)
     if st.button("입력한 데이터로 그래프 그리기",type="primary",key=f"{prefix}_add"):
         x=pd.to_numeric(edited.get("X",pd.Series(dtype=float)),errors="coerce")
-        y=pd.to_numeric(edited.get("Y",pd.Series(dtype=float)),errors="coerce")
-        valid=x.notna() & y.notna()
-        if int(valid.sum())<2:
-            st.error("그래프를 그리려면 숫자로 된 X/Y 쌍을 2개 이상 입력하세요.")
+        base_name=str(new_name).strip() or "새 스펙트럼"
+        new_items=[]
+        for col in [c for c in edited.columns if c!="X"]:
+            y=pd.to_numeric(edited[col],errors="coerce")
+            valid=x.notna() & y.notna()
+            if int(valid.sum())<2:
+                continue
+            curve_name=base_name if len(edited.columns)==2 else f"{base_name} · {col}"
+            new_items.append({"name":curve_name,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
+                              "x_label":str(x_label).strip() or "X",
+                              "y_label":(str(y_label).strip() or str(col)) if len(edited.columns)==2 else str(col)})
+        if not new_items:
+            st.error("그래프를 그리려면 숫자로 된 X/Y 쌍이 2개 이상인 열을 입력하세요.")
         else:
-            item={"name":str(new_name).strip() or "새 스펙트럼",
-                  "x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
-                  "x_label":str(x_label).strip() or "X","y_label":str(y_label).strip() or "Y"}
-            existing=[s["name"] for s in st.session_state.series]
-            st.session_state.series=make_series_names_unique([*st.session_state.series,item])
-            added_name=st.session_state.series[-1]["name"]
-            st.session_state["graph_selected"]=list(dict.fromkeys([*st.session_state.get("graph_selected",[]),added_name]))
+            old_count=len(st.session_state.series)
+            st.session_state.series=make_series_names_unique([*st.session_state.series,*new_items])
+            added_names=[s["name"] for s in st.session_state.series[old_count:]]
+            st.session_state["graph_selected"]=list(dict.fromkeys([*st.session_state.get("graph_selected",[]),*added_names]))
             st.rerun()
 
 with st.sidebar:
