@@ -894,11 +894,11 @@ with tabs[0]:
                     st.caption(f"자동 여백 · 오른쪽 {margin_right} px · 위쪽 {margin_top} px")
                 else:
                     m1,m2=st.columns(2)
-                    margin_left=m1.number_input("왼쪽 여백",min_value=0,max_value=2000,value=65,step=5,key="graph_margin_left")
+                    margin_left=m1.number_input("왼쪽 여백",min_value=0,max_value=2000,value=90,step=5,key="graph_margin_left")
                     margin_right=m2.number_input("오른쪽 여백",min_value=0,max_value=2000,value=20,step=5,key="graph_margin_right")
                     m3,m4=st.columns(2)
                     margin_top=m3.number_input("위쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_top")
-                    margin_bottom=m4.number_input("아래쪽 여백",min_value=0,max_value=2000,value=50,step=5,key="graph_margin_bottom")
+                    margin_bottom=m4.number_input("아래쪽 여백",min_value=0,max_value=2000,value=60,step=5,key="graph_margin_bottom")
                     plot_margins=(margin_left,margin_right,margin_top,margin_bottom)
             plot_box_width=int(canvas_width_px-margin_left-margin_right)
             plot_box_height=int(canvas_height_px-margin_top-margin_bottom)
@@ -906,10 +906,10 @@ with tabs[0]:
                                        help="미리보기와 PNG 저장에 같은 DPI를 적용합니다. DPI를 바꿔도 설정한 픽셀 크기는 유지됩니다.")
             preview_dpi=export_dpi
             font_family=st.selectbox("글꼴",["Arial","DejaVu Sans","Liberation Sans","Times New Roman"],index=0,key="graph_font_family")
-            axis_label_size=synced_font_control("축 제목 글자 크기",6,40,12,"graph_axis_font_size")
-            title_font_size=synced_font_control("그래프 제목 글자 크기",6,48,14,"graph_title_font_size")
-            tick_font_size=synced_font_control("눈금 글자 크기",6,32,10,"graph_tick_font_size")
-            legend_font_size=synced_font_control("범례 글자 크기",6,32,9,"graph_legend_font_size")
+            axis_label_size=synced_font_control("축 제목 글자 크기",16,40,12,"graph_axis_font_size")
+            title_font_size=synced_font_control("그래프 제목 글자 크기",16,48,14,"graph_title_font_size")
+            tick_font_size=synced_font_control("눈금 글자 크기",16,32,10,"graph_tick_font_size")
+            legend_font_size=synced_font_control("범례 글자 크기",16,32,9,"graph_legend_font_size")
         with axis_tab:
             with st.expander("축 제목 / 그래프 제목",expanded=False):
                 xlab=st.text_input("X축 제목",series[0]["x_label"],key="graph_xlabel")
