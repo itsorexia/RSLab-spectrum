@@ -268,6 +268,42 @@ def transform(s, opts):
     elif mode=="Custom divisor" and opts["divisor"]!=0: y=y/opts["divisor"]
     return y
 
+def compute_average_curve(target_names, series, values_by_name, axis_label):
+    """Average selected curves on the first selected curve's grid over their shared X range."""
+    lookup={item["name"]:item for item in series}
+    curves=[]
+    for name in target_names:
+        item=lookup.get(name)
+        if item is None or str(item.get("x_label","X"))!=str(axis_label) or name not in values_by_name:
+            continue
+        x=np.asarray(item["x"],dtype=float)
+        y=np.asarray(values_by_name[name],dtype=float)
+        valid=np.isfinite(x)&np.isfinite(y)
+        x,y=x[valid],y[valid]
+        if len(x)<2:
+            continue
+        order=np.argsort(x)
+        x,y=x[order],y[order]
+        unique_x,inverse=np.unique(x,return_inverse=True)
+        if len(unique_x)<2:
+            continue
+        sums=np.bincount(inverse,weights=y)
+        counts=np.bincount(inverse)
+        curves.append((unique_x,sums/counts))
+    if len(curves)<2:
+        return None
+    overlap_min=max(float(x[0]) for x,_ in curves)
+    overlap_max=min(float(x[-1]) for x,_ in curves)
+    if overlap_min>=overlap_max:
+        return None
+    reference_x=curves[0][0]
+    reference_x=reference_x[(reference_x>=overlap_min)&(reference_x<=overlap_max)]
+    if len(reference_x)<2:
+        return None
+    aligned=np.vstack([np.interp(reference_x,x,y) for x,y in curves])
+    return {"name":f"평균 ({len(curves)}개 곡선)","x":reference_x,
+            "y":np.mean(aligned,axis=0),"count":len(curves),"axis_label":axis_label}
+
 def make_plot(width_px, height_px, size_mode, margins, dpi):
     """Create a plot with either a fixed canvas or fixed inner plot dimensions."""
     left, right, top, bottom = [float(v) for v in margins]
@@ -846,6 +882,15 @@ with tabs[0]:
             selected=[renamed.get(name,name) for name in selected]
             st.session_state["graph_name_aliases"]=renamed
             names=[s["name"] for s in series]
+            st.markdown("**평균 곡선**")
+            average_enabled=st.checkbox("선택 곡선 평균을 그래프에 표시",value=False,key="graph_average_enabled")
+            average_axis_labels=list(dict.fromkeys(str(s.get("x_label","X")) for s in series))
+            average_axis=st.selectbox("평균 계산 X축",average_axis_labels,key="graph_average_axis")
+            average_candidates=[s["name"] for s in series if str(s.get("x_label","X"))==average_axis]
+            average_default=[n for n in selected if n in average_candidates]
+            average_targets=st.multiselect("평균에 포함할 곡선",average_candidates,default=average_default,
+                                           key="graph_average_targets")
+            st.caption("현재 SG 필터·baseline·normalization을 각 곡선에 적용한 뒤, 공통 X 범위에서 평균합니다. X 간격이 다르면 첫 곡선의 X 좌표에 맞춰 보간합니다.")
             st.markdown("**곡선 색상 및 선 굵기**")
             style_cols=st.columns(2)
             for i,s in enumerate(series):
@@ -906,10 +951,10 @@ with tabs[0]:
                                        help="미리보기와 PNG 저장에 같은 DPI를 적용합니다. DPI를 바꿔도 설정한 픽셀 크기는 유지됩니다.")
             preview_dpi=export_dpi
             font_family=st.selectbox("글꼴",["Arial","DejaVu Sans","Liberation Sans","Times New Roman"],index=0,key="graph_font_family")
-            axis_label_size=synced_font_control("축 제목 글자 크기",16,40,16,"graph_axis_font_size")
-            title_font_size=synced_font_control("그래프 제목 글자 크기",16,48,14,"graph_title_font_size")
-            tick_font_size=synced_font_control("눈금 글자 크기",16,32,16,"graph_tick_font_size")
-            legend_font_size=synced_font_control("범례 글자 크기",10,32,9,"graph_legend_font_size")
+            axis_label_size=synced_font_control("축 제목 글자 크기",6,40,12,"graph_axis_font_size")
+            title_font_size=synced_font_control("그래프 제목 글자 크기",6,48,14,"graph_title_font_size")
+            tick_font_size=synced_font_control("눈금 글자 크기",6,32,10,"graph_tick_font_size")
+            legend_font_size=synced_font_control("범례 글자 크기",6,32,9,"graph_legend_font_size")
         with axis_tab:
             with st.expander("축 제목 / 그래프 제목",expanded=False):
                 xlab=st.text_input("X축 제목",series[0]["x_label"],key="graph_xlabel")
@@ -975,6 +1020,7 @@ with tabs[0]:
         fig,ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
         apply_graph_frame(ax,show_graph_frame,graph_frame_width)
         proc={s["name"]:transform(s,opts) for s in series}
+        average_curve=compute_average_curve(average_targets,series,proc,average_axis) if average_enabled else None
         # Base the automatic vertical stack spacing on the visible X range.
         # This keeps the gaps proportional when the user zooms into a narrower range.
         x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
@@ -993,10 +1039,22 @@ with tabs[0]:
             s=next(z for z in series if z["name"]==n)
             off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
             ax.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
+        if average_enabled:
+            if average_curve is None:
+                st.warning("평균 곡선을 만들 수 없습니다. 같은 X축의 곡선을 2개 이상 선택하고 공통 X 범위를 확인하세요.")
+            else:
+                ax.plot(average_curve["x"],average_curve["y"],label=average_curve["name"],
+                        color="#d62728",linestyle="--",linewidth=max(float(line_width),2.0),zorder=5)
         ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
         if y_auto:
             visible_limits=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
-            if visible_limits: ax.set_ylim(*visible_limits)
+            if visible_limits:
+                ylo,yhi=visible_limits
+                if average_curve is not None:
+                    avg_mask=(average_curve["x"]>=min(xmin,xmax))&(average_curve["x"]<=max(xmin,xmax))
+                    avg_y=average_curve["y"][avg_mask]
+                    if len(avg_y): ylo=min(ylo,float(np.nanmin(avg_y))); yhi=max(yhi,float(np.nanmax(avg_y)))
+                ax.set_ylim(ylo,yhi)
         else: ax.set_ylim(min(ymin,ymax),max(ymin,ymax))
         ax.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); ax.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
         ax.set_title(title or None,fontsize=title_font_size)
@@ -1163,10 +1221,19 @@ with tabs[2]:
             s=next(z for z in series if z["name"]==n)
             off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
             axout.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
+    if average_enabled and average_curve is not None:
+        axout.plot(average_curve["x"],average_curve["y"],label=average_curve["name"],
+                   color="#d62728",linestyle="--",linewidth=max(float(line_width),2.0),zorder=5)
     axout.set_xlim(min(xmin,xmax),max(xmin,xmax))
     if y_auto:
         visible_limits=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
-        if visible_limits: axout.set_ylim(*visible_limits)
+        if visible_limits:
+            ylo,yhi=visible_limits
+            if average_enabled and average_curve is not None:
+                avg_mask=(average_curve["x"]>=min(xmin,xmax))&(average_curve["x"]<=max(xmin,xmax))
+                avg_y=average_curve["y"][avg_mask]
+                if len(avg_y): ylo=min(ylo,float(np.nanmin(avg_y))); yhi=max(yhi,float(np.nanmax(avg_y)))
+            axout.set_ylim(ylo,yhi)
     else: axout.set_ylim(min(ymin,ymax),max(ymin,ymax))
     axout.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); axout.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
     axout.set_title(title or None,fontsize=title_font_size)
@@ -1182,6 +1249,14 @@ with tabs[2]:
     st.download_button(f"그래프 PNG ({canvas_width_px} × {canvas_height_px} px)",png_data,"spectrum.png","image/png")
     st.caption(f"플롯 박스: {plot_box_width} × {plot_box_height} px · 전체 PNG: {canvas_width_px} × {canvas_height_px} px · DPI: {export_dpi}")
     st.subheader("데이터 파일 저장")
+    if average_enabled and average_curve is not None:
+        average_table=pd.DataFrame({"X":average_curve["x"],average_curve["name"]:average_curve["y"]})
+        avg_csv_col,avg_txt_col=st.columns(2)
+        avg_csv_col.download_button("평균 곡선 CSV",average_table.to_csv(index=False).encode("utf-8-sig"),
+                                    "average_spectrum.csv","text/csv",key="average_curve_csv",use_container_width=True)
+        avg_txt_col.download_button("평균 곡선 TXT",average_table.to_csv(index=False,sep="\t").encode("utf-8-sig"),
+                                    "average_spectrum.txt","text/plain",key="average_curve_txt",use_container_width=True)
+        st.caption(f"평균에 포함된 곡선: {average_curve['count']}개 · 공통 X 범위: {average_curve['x'][0]:g}–{average_curve['x'][-1]:g}")
     st.markdown("<style>div[data-testid='stDownloadButton'] button{max-width:350px !important;width:100% !important;}</style>",unsafe_allow_html=True)
     selected_targets=[n for n in selected if n in names]
     raw_values={s["name"]:np.asarray(s["raw"],dtype=float) for s in series}
