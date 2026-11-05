@@ -461,13 +461,11 @@ def sync_widget_value(source_key, target_key):
 
 def synced_font_control(label, minimum, maximum, default, key):
     input_key=f"{key}_input"
-    if key not in st.session_state and input_key not in st.session_state:
-        st.session_state[key]=default
-        st.session_state[input_key]=default
-    elif key not in st.session_state:
-        st.session_state[key]=st.session_state[input_key]
-    elif input_key not in st.session_state:
-        st.session_state[input_key]=st.session_state[key]
+    # Reconcile stale values before either keyed widget is instantiated.
+    current=st.session_state.get(key,st.session_state.get(input_key,default))
+    current=max(minimum,min(maximum,int(current)))
+    st.session_state[key]=current
+    st.session_state[input_key]=current
     slider_col,input_col=st.columns([5,1])
     slider_col.slider(label,min_value=minimum,max_value=maximum,key=key,
                       on_change=sync_widget_value,args=(key,input_key))
@@ -478,13 +476,11 @@ def synced_font_control(label, minimum, maximum, default, key):
 
 def synced_float_control(label, minimum, maximum, default, step, key, disabled=False):
     input_key=f"{key}_input"
-    if key not in st.session_state and input_key not in st.session_state:
-        st.session_state[key]=default
-        st.session_state[input_key]=default
-    elif key not in st.session_state:
-        st.session_state[key]=st.session_state[input_key]
-    elif input_key not in st.session_state:
-        st.session_state[input_key]=st.session_state[key]
+    # Reconcile stale values before either keyed widget is instantiated.
+    current=float(st.session_state.get(key,st.session_state.get(input_key,default)))
+    current=max(float(minimum),min(float(maximum),current))
+    st.session_state[key]=current
+    st.session_state[input_key]=current
     slider_col,input_col=st.columns([5,1])
     slider_col.slider(label,min_value=minimum,max_value=maximum,step=step,key=key,disabled=disabled,
                       on_change=sync_widget_value,args=(key,input_key))
