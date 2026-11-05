@@ -908,7 +908,7 @@ with tabs[0]:
             font_family=st.selectbox("글꼴",["Arial","DejaVu Sans","Liberation Sans","Times New Roman"],index=0,key="graph_font_family")
             axis_label_size=synced_font_control("축 제목 글자 크기",16,40,16,"graph_axis_font_size")
             title_font_size=synced_font_control("그래프 제목 글자 크기",16,48,14,"graph_title_font_size")
-            tick_font_size=synced_font_control("눈금 글자 크기",16,32,10,"graph_tick_font_size")
+            tick_font_size=synced_font_control("눈금 글자 크기",16,32,16,"graph_tick_font_size")
             legend_font_size=synced_font_control("범례 글자 크기",10,32,9,"graph_legend_font_size")
         with axis_tab:
             with st.expander("축 제목 / 그래프 제목",expanded=False):
