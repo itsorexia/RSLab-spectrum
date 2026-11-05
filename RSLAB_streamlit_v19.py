@@ -262,9 +262,20 @@ def transform(s, opts):
             y=savgol_filter(y,window,polyorder)
     y=baseline(y,opts["baseline"],opts["degree"],opts["lam"],opts["p"],opts["iterations"])
     mode=opts["normalization"]
+    reference_y=y
+    normalization_range=opts.get("normalization_range")
+    if normalization_range is not None:
+        x=np.asarray(s["x"],dtype=float)
+        range_min,range_max=sorted((float(normalization_range[0]),float(normalization_range[1])))
+        in_range=np.isfinite(x)&np.isfinite(y)&(x>=range_min)&(x<=range_max)
+        if np.any(in_range):
+            reference_y=y[in_range]
     if mode=="Min-max":
-        lo,hi=np.nanmin(y),np.nanmax(y); y=(y-lo)/(hi-lo) if hi!=lo else y*0
-    elif mode=="Maximum" and np.nanmax(y)!=0: y=y/np.nanmax(y)
+        lo,hi=np.nanmin(reference_y),np.nanmax(reference_y)
+        y=(y-lo)/(hi-lo) if hi!=lo else y*0
+    elif mode=="Maximum":
+        reference_max=np.nanmax(reference_y)
+        if reference_max!=0: y=y/reference_max
     elif mode=="Custom divisor" and opts["divisor"]!=0: y=y/opts["divisor"]
     return y
 
@@ -808,8 +819,15 @@ with st.sidebar:
         if normalization_enabled:
             normalization=st.selectbox("Normalization 종류",["Min-max","Maximum","Custom divisor"],key="normalization_method")
             divisor=st.number_input("사용자 나눗수",value=1.0,format="%.6g",key="normalization_divisor") if normalization=="Custom divisor" else 1.0
+            if normalization in ("Min-max","Maximum"):
+                normalization_scope=st.selectbox("정규화 기준 범위",["전체 데이터","현재 그래프 X 범위"],key="normalization_scope",
+                                                 help="선택한 범위에서 정규화 기준값을 계산한 뒤 곡선 전체에 적용합니다.")
+                st.caption("현재 그래프 X 범위를 선택하면 축 설정의 X 최소·최대 사이 데이터로 기준값을 계산합니다.")
+            else:
+                normalization_scope="전체 데이터"
         else:
             normalization="없음"
+            normalization_scope="전체 데이터"
             divisor=1.0
     with baseline_tab:
         baseline_enabled=st.checkbox("Baseline 적용",value=False,key="baseline_enabled")
@@ -966,6 +984,8 @@ with tabs[0]:
             x1,x2=st.columns(2)
             xmin=x1.number_input("X 최소",value=data_xmin,format="%.6g",disabled=x_auto,key="graph_xmin")
             xmax=x2.number_input("X 최대",value=data_xmax,format="%.6g",disabled=x_auto,key="graph_xmax")
+            opts["normalization_range"]=(tuple(sorted((float(xmin),float(xmax))))
+                                          if normalization_scope=="현재 그래프 X 범위" else None)
             y_auto=st.checkbox("Y축 자동 범위",value=True,key="graph_y_auto")
             proc_min=min(float(np.nanmin(transform(s,opts))) for s in series)
             proc_max=max(float(np.nanmax(transform(s,opts))) for s in series)
