@@ -8,7 +8,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import plotly.express as px
 from PIL import Image
-from matplotlib.colors import to_hex
+from matplotlib.colors import to_hex, to_rgb
 from matplotlib.ticker import MultipleLocator, FuncFormatter
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
@@ -519,6 +519,49 @@ def format_axis_label(label):
         flags=re.IGNORECASE,
     )
 
+def extract_uploaded_palette(upload):
+    """Read an ordered hex list or extract dominant colors from an uploaded image."""
+    if upload is None:
+        return []
+    suffix=Path(upload.name).suffix.lower()
+    if suffix in (".png",".jpg",".jpeg",".webp"):
+        with Image.open(io.BytesIO(upload.getvalue())) as source:
+            rgba=source.convert("RGBA")
+            background=Image.new("RGBA",rgba.size,"white")
+            background.alpha_composite(rgba)
+            quantized=background.convert("RGB").quantize(colors=16,method=Image.Quantize.MEDIANCUT)
+            palette=quantized.getpalette()
+            counts=sorted(quantized.getcolors(maxcolors=256) or [],reverse=True)
+            colors=[]
+            for count,index in counts:
+                base=index*3
+                color=to_hex(tuple(channel/255 for channel in palette[base:base+3]))
+                if color not in colors:
+                    colors.append(color)
+            return colors
+    text=read_text(upload)
+    tokens=re.findall(r"#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}(?![0-9a-fA-F])",text)
+    colors=[]
+    for token in tokens:
+        if len(token)==4:
+            token="#"+"".join(char*2 for char in token[1:])
+        token=token.upper()
+        if token not in colors:
+            colors.append(token)
+    return colors
+
+def interpolate_palette(colors,count,index):
+    """Sample an uploaded palette evenly, interpolating when there are few swatches."""
+    if len(colors)==1 or count<=1:
+        return colors[0]
+    points=np.asarray([to_rgb(color) for color in colors],dtype=float)
+    position=index*(len(points)-1)/(count-1)
+    left=int(np.floor(position))
+    right=min(left+1,len(points)-1)
+    fraction=position-left
+    rgb=points[left]*(1-fraction)+points[right]*fraction
+    return to_hex(rgb)
+
 def state_json(series):
     data=[]
     for s in series:
@@ -835,7 +878,27 @@ with tabs[0]:
                 for i,s in enumerate(series):
                     s["offset"]=st.number_input(f"{s['name']} 오프셋",value=float(s.get("offset",0)),key=f"off_{i}")
         with visual_tab:
-            palette=st.selectbox("색상 팔레트",["Origin","viridis","plasma","inferno","magma","cividis","turbo","coolwarm","rainbow"],key="graph_palette")
+            palette_upload=st.file_uploader("색상 팔레트 업로드 (이미지 / TXT / CSV)",
+                                             type=["png","jpg","jpeg","webp","txt","csv"],
+                                             key="graph_palette_upload",
+                                             help="이미지는 주요 색상 최대 16개를 추출하고, TXT/CSV는 #RRGGBB 코드를 파일 순서대로 읽습니다.")
+            try:
+                uploaded_palette=extract_uploaded_palette(palette_upload)
+            except Exception as e:
+                uploaded_palette=[]
+                st.warning(f"팔레트를 읽을 수 없습니다: {e}")
+            palette_options=["Origin","viridis","plasma","inferno","magma","cividis","turbo","coolwarm","rainbow"]
+            if uploaded_palette:
+                palette_options.append("업로드 팔레트")
+                st.caption(f"업로드 팔레트 색상 {len(uploaded_palette)}개")
+            elif st.session_state.get("graph_palette")=="업로드 팔레트":
+                st.session_state["graph_palette"]="Origin"
+            palette=st.selectbox("색상 팔레트",palette_options,key="graph_palette")
+            if palette=="업로드 팔레트":
+                preview_cols=st.columns(min(len(uploaded_palette),8))
+                for j,color in enumerate(uploaded_palette):
+                    with preview_cols[j%len(preview_cols)]:
+                        st.markdown(f"<div title='{color}' style='height:22px;background:{color};border:1px solid #d1d5db;border-radius:5px'></div><small>{color}</small>",unsafe_allow_html=True)
             color_mode=st.radio("색상 설정",["팔레트 사용","곡선별 지정"],horizontal=True,key="graph_color_mode")
             width_mode=st.radio("선 굵기 설정",["전체 동일","곡선별 지정"],horizontal=True,key="graph_width_mode")
             line_width=synced_float_control("전체 선 굵기",0.5,5.0,1.8,0.1,"graph_line_width")
@@ -865,7 +928,10 @@ with tabs[0]:
             for i,s in enumerate(series):
                 with st.container(border=True):
                     st.markdown(f"**{s['name']}**")
-                    palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
+                    if palette=="업로드 팔레트" and uploaded_palette:
+                        palette_color=interpolate_palette(uploaded_palette,len(series),i)
+                    else:
+                        palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
                     curve_color=st.color_picker("선 색상",value=palette_color,key=f"color_{i}") if color_mode=="곡선별 지정" else palette_color
                     curve_width=st.number_input("개별 선 굵기",min_value=0.5,max_value=10.0,value=float(line_width),step=0.1,key=f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
                     style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
