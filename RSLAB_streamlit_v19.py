@@ -958,7 +958,7 @@ with tabs[0]:
                     else:
                         curve_color=palette_color
                         color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
-                    curve_width=st.number_input("개별 선 굵기",min_value=0.5,max_value=10.0,value=float(line_width),step=0.1,key=f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
+                    curve_width=synced_float_control("개별 선 굵기",0.5,10.0,float(line_width),0.1,f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
                     style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
             renamed={old:new["name"] for old,new in zip(old_names,series)}
             selected=[renamed.get(name,name) for name in selected]
