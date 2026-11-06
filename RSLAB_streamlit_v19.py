@@ -882,6 +882,12 @@ with tabs[0]:
                                              type=["png","jpg","jpeg","webp","txt","csv"],
                                              key="graph_palette_upload",
                                              help="이미지는 주요 색상 최대 16개를 추출하고, TXT/CSV는 #RRGGBB 코드를 파일 순서대로 읽습니다.")
+            palette_template=("# RSLAB color palette template\n"
+                              "# 한 줄에 HEX 색상 코드를 하나씩 입력하세요.\n"
+                              "#R4E4F2\n#76B7B2\n#59A14F\n#EDC948\n"
+                              "#F28E2B\n#E15759\n#B07AA1\n#4E79A7\n")
+            st.download_button("색상 팔레트 템플릿 다운로드",palette_template,
+                               "color_palette_template.txt","text/plain",key="palette_template_download")
             try:
                 uploaded_palette=extract_uploaded_palette(palette_upload)
             except Exception as e:
@@ -927,12 +933,18 @@ with tabs[0]:
             st.markdown("**곡선 색상 및 선 굵기**")
             for i,s in enumerate(series):
                 with st.container(border=True):
-                    st.markdown(f"**{s['name']}**")
                     if palette=="업로드 팔레트" and uploaded_palette:
                         palette_color=interpolate_palette(uploaded_palette,len(series),i)
                     else:
                         palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
-                    curve_color=st.color_picker("선 색상",value=palette_color,key=f"color_{i}") if color_mode=="곡선별 지정" else palette_color
+                    name_col,color_col=st.columns([8,1],vertical_alignment="center")
+                    name_col.markdown(f"**{s['name']}**")
+                    if color_mode=="곡선별 지정":
+                        curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
+                                                           label_visibility="collapsed")
+                    else:
+                        curve_color=palette_color
+                        color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
                     curve_width=st.number_input("개별 선 굵기",min_value=0.5,max_value=10.0,value=float(line_width),step=0.1,key=f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
                     style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
         with size_tab:
