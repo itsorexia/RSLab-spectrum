@@ -942,14 +942,29 @@ with tabs[0]:
                                          help="체크를 해제해도 왼쪽 Y축과 아래쪽 X축 선은 유지됩니다.")
             graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
             old_names=names.copy()
-            st.markdown("**곡선 이름 변경**")
-            name_cols=st.columns(2)
+            st.markdown("**곡선 색상 및 선 굵기**")
             for i,s in enumerate(series):
-                with name_cols[i%2]:
-                    s["name"]=st.text_input(f"곡선 이름 {i+1}",s["name"],key=f"nm_{i}")
+                with st.container(border=True):
+                    if palette=="업로드 팔레트" and uploaded_palette:
+                        palette_color=interpolate_palette(uploaded_palette,len(series),i)
+                    else:
+                        palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
+                    name_col,color_col=st.columns([8,1],vertical_alignment="center")
+                    s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
+                                                  label_visibility="collapsed")
+                    if color_mode=="곡선별 지정":
+                        curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
+                                                           label_visibility="collapsed")
+                    else:
+                        curve_color=palette_color
+                        color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
+                    curve_width=st.number_input("개별 선 굵기",min_value=0.5,max_value=10.0,value=float(line_width),step=0.1,key=f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
+                    style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
             renamed={old:new["name"] for old,new in zip(old_names,series)}
             selected=[renamed.get(name,name) for name in selected]
             st.session_state["graph_name_aliases"]=renamed
+            if "graph_average_targets" in st.session_state:
+                st.session_state["graph_average_targets"]=[renamed.get(name,name) for name in st.session_state["graph_average_targets"]]
             names=[s["name"] for s in series]
             st.markdown("**평균 곡선**")
             average_enabled=st.checkbox("선택 곡선 평균을 그래프에 표시",value=False,key="graph_average_enabled")
@@ -960,23 +975,7 @@ with tabs[0]:
             average_targets=st.multiselect("평균에 포함할 곡선",average_candidates,default=average_default,
                                            key="graph_average_targets")
             st.caption("현재 SG 필터·baseline·normalization을 각 곡선에 적용한 뒤, 공통 X 범위에서 평균합니다. X 간격이 다르면 첫 곡선의 X 좌표에 맞춰 보간합니다.")
-            st.markdown("**곡선 색상 및 선 굵기**")
-            for i,s in enumerate(series):
-                with st.container(border=True):
-                    if palette=="업로드 팔레트" and uploaded_palette:
-                        palette_color=interpolate_palette(uploaded_palette,len(series),i)
-                    else:
-                        palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
-                    name_col,color_col=st.columns([8,1],vertical_alignment="center")
-                    name_col.markdown(f"**{s['name']}**")
-                    if color_mode=="곡선별 지정":
-                        curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
-                                                           label_visibility="collapsed")
-                    else:
-                        curve_color=palette_color
-                        color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
-                    curve_width=st.number_input("개별 선 굵기",min_value=0.5,max_value=10.0,value=float(line_width),step=0.1,key=f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
-                    style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
+
         with size_tab:
             size_mode="전체 이미지 기준"
             st.caption("전체 이미지 크기를 먼저 정하고, 필요하면 그 안의 플롯 박스 크기를 따로 지정합니다.")
