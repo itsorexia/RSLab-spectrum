@@ -980,13 +980,13 @@ with tabs[0]:
             graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
             old_names=names.copy()
             with st.expander("곡선 순서 변경",expanded=False):
-                st.caption("화살표를 누르면 그래프와 범례 순서가 바뀝니다.")
+                st.caption("각 곡선 옆의 위로·아래로 버튼을 눌러 순서를 바꾸세요.")
                 for order_i,curve in enumerate(series):
-                    order_name,up_col,down_col=st.columns([8,1,1],vertical_alignment="center")
+                    order_name,up_col,down_col=st.columns([6,2,2],vertical_alignment="center")
                     order_name.write(curve["name"])
-                    up_col.button("↑",key=f"curve_up_{order_i}",disabled=order_i==0,
+                    up_col.button("위로",key=f"curve_up_{order_i}",disabled=order_i==0,
                                   on_click=move_curve,args=(order_i,-1),use_container_width=True)
-                    down_col.button("↓",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
+                    down_col.button("아래로",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
                                     on_click=move_curve,args=(order_i,1),use_container_width=True)
             st.markdown("**곡선 색상 및 선 굵기**")
             for i,s in enumerate(series):
