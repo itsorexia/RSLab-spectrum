@@ -519,6 +519,43 @@ def synced_float_control(label, minimum, maximum, default, step, key, disabled=F
                            on_change=sync_widget_value,args=(input_key,key))
     return float(st.session_state[key])
 
+def validate_curve_name(index):
+    """Reject empty or duplicate curve names before the editor reruns."""
+    series=st.session_state.get("series",[])
+    if not 0 <= index < len(series):
+        return
+    key=f"nm_{index}"
+    proposed=str(st.session_state.get(key,"")).strip()
+    duplicate=any(i != index and str(item.get("name"," ")).strip().casefold()==proposed.casefold()
+                  for i,item in enumerate(series))
+    if not proposed or duplicate:
+        st.session_state[key]=series[index].get("name","")
+        st.session_state["curve_name_error"]=("곡선 이름은 비워둘 수 없습니다." if not proposed
+                                               else f"'{proposed}' 이름을 이미 사용 중입니다. 다른 이름을 입력하세요.")
+        return
+    series[index]["name"]=proposed
+
+def move_curve(index, direction):
+    """Move a curve and its keyed appearance settings together."""
+    series=st.session_state.get("series",[])
+    target=index+direction
+    if not 0 <= index < len(series) or not 0 <= target < len(series):
+        return
+    series[index],series[target]=series[target],series[index]
+    for prefix in ("nm", "color", "lw", "lw_input", "off"):
+        left,right=f"{prefix}_{index}",f"{prefix}_{target}"
+        left_exists,right_exists=left in st.session_state,right in st.session_state
+        left_value=st.session_state.get(left)
+        right_value=st.session_state.get(right)
+        if right_exists:
+            st.session_state[left]=right_value
+        elif left_exists:
+            del st.session_state[left]
+        if left_exists:
+            st.session_state[right]=left_value
+        elif right_exists:
+            del st.session_state[right]
+
 def axis_tick_options_ui(container, axis_name, key_prefix):
     with container:
         st.markdown(f"**{axis_name} 눈금 숫자 표시**")
@@ -942,6 +979,15 @@ with tabs[0]:
                                          help="체크를 해제해도 왼쪽 Y축과 아래쪽 X축 선은 유지됩니다.")
             graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
             old_names=names.copy()
+            with st.expander("곡선 순서 변경",expanded=False):
+                st.caption("화살표를 누르면 그래프와 범례 순서가 바뀝니다.")
+                for order_i,curve in enumerate(series):
+                    order_name,up_col,down_col=st.columns([8,1,1],vertical_alignment="center")
+                    order_name.write(curve["name"])
+                    up_col.button("↑",key=f"curve_up_{order_i}",disabled=order_i==0,
+                                  on_click=move_curve,args=(order_i,-1),use_container_width=True)
+                    down_col.button("↓",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
+                                    on_click=move_curve,args=(order_i,1),use_container_width=True)
             st.markdown("**곡선 색상 및 선 굵기**")
             for i,s in enumerate(series):
                 with st.container(border=True):
@@ -951,7 +997,7 @@ with tabs[0]:
                         palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
                     name_col,color_col=st.columns([8,1],vertical_alignment="center")
                     s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
-                                                  label_visibility="collapsed")
+                                                  label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
                     if color_mode=="곡선별 지정":
                         curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
                                                            label_visibility="collapsed")
@@ -960,6 +1006,9 @@ with tabs[0]:
                         color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
                     curve_width=synced_float_control("개별 선 굵기",0.5,10.0,float(line_width),0.1,f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
                     style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
+            curve_name_error=st.session_state.pop("curve_name_error",None)
+            if curve_name_error:
+                st.error(curve_name_error)
             renamed={old:new["name"] for old,new in zip(old_names,series)}
             selected=[renamed.get(name,name) for name in selected]
             st.session_state["graph_name_aliases"]=renamed
