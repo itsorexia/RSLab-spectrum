@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import plotly.express as px
 from PIL import Image
 from matplotlib.colors import to_hex, to_rgb
+from matplotlib import font_manager
 from matplotlib.ticker import MultipleLocator, FuncFormatter
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
@@ -16,6 +17,35 @@ from scipy.signal import find_peaks, savgol_filter
 
 st.set_page_config(page_title="RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬", layout="wide")
 st.title("RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬")
+
+FONT_DIR=Path(__file__).resolve().parent/"fonts"
+BUNDLED_FONT_FAMILIES=set()
+if FONT_DIR.is_dir():
+    registered_paths={str(Path(font.fname).resolve()) for font in font_manager.fontManager.ttflist if getattr(font,"fname",None)}
+    for font_path in sorted([*FONT_DIR.glob("*.ttf"),*FONT_DIR.glob("*.otf")]):
+        try:
+            resolved=str(font_path.resolve())
+            if resolved not in registered_paths:
+                font_manager.fontManager.addfont(resolved)
+                registered_paths.add(resolved)
+            BUNDLED_FONT_FAMILIES.add(font_manager.FontProperties(fname=resolved).get_name())
+        except Exception as exc:
+            st.warning(f"글꼴 파일을 등록하지 못했습니다 ({font_path.name}): {exc}")
+
+def font_family_available(family):
+    try:
+        font_manager.findfont(font_manager.FontProperties(family=family),fallback_to_default=False)
+        return True
+    except (ValueError,RuntimeError):
+        return False
+
+def apply_plot_font(family):
+    fallback=[family]
+    if family!="Noto Sans KR" and font_family_available("Noto Sans KR"):
+        fallback.append("Noto Sans KR")
+    if "DejaVu Sans" not in fallback:
+        fallback.append("DejaVu Sans")
+    plt.rcParams["font.family"]=fallback
 
 def read_text(upload):
     raw=upload.getvalue()
@@ -998,7 +1028,11 @@ with tabs[0]:
             export_dpi=st.number_input("미리보기 / PNG 저장 DPI",min_value=100,max_value=1200,value=300,step=50,key="graph_export_dpi",
                                        help="미리보기와 PNG 저장에 같은 DPI를 적용합니다. DPI를 바꿔도 설정한 픽셀 크기는 유지됩니다.")
             preview_dpi=export_dpi
-            font_family=st.selectbox("글꼴",["Arial","DejaVu Sans","Liberation Sans","Times New Roman"],index=0,key="graph_font_family")
+            base_font_options=["Arial","DejaVu Sans","Liberation Sans","Times New Roman"]
+            font_options=list(dict.fromkeys([*base_font_options,*sorted(BUNDLED_FONT_FAMILIES)]))
+            font_family=st.selectbox("글꼴",font_options,index=font_options.index("Arial"),key="graph_font_family")
+            if not font_family_available(font_family):
+                st.warning(f"{font_family} 글꼴 파일을 찾을 수 없습니다. 저장소의 fonts 폴더에 글꼴 파일을 넣어야 실제로 적용됩니다.")
             axis_label_size=synced_font_control("축 제목 글자 크기",6,40,12,"graph_axis_font_size")
             title_font_size=synced_font_control("그래프 제목 글자 크기",6,48,14,"graph_title_font_size")
             tick_font_size=synced_font_control("눈금 글자 크기",6,32,10,"graph_tick_font_size")
@@ -1066,7 +1100,7 @@ with tabs[0]:
     with plot_col:
         st.subheader("그래프 미리보기")
         # Keep the selected typeface for normal text and fall back for missing glyphs.
-        plt.rcParams["font.family"]=[font_family, "DejaVu Sans"]
+        apply_plot_font(font_family)
         fig,ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
         apply_graph_frame(ax,show_graph_frame,graph_frame_width)
         proc={s["name"]:transform(s,opts) for s in series}
@@ -1135,7 +1169,7 @@ with tabs[1]:
         st.write(f"찾은 피크: {len(peaks)}개")
         st.dataframe(peak_df,use_container_width=True)
         if len(peaks):
-            plt.rcParams["font.family"]=[font_family,"DejaVu Sans"]
+            apply_plot_font(font_family)
             fig2,ax2=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
             apply_graph_frame(ax2,show_graph_frame,graph_frame_width)
             peak_plot_names=[n for n in names if n in selected]
@@ -1263,7 +1297,7 @@ with tabs[1]:
 
 with tabs[2]:
     st.subheader("그래프 저장")
-    plt.rcParams["font.family"]=[font_family, "DejaVu Sans"]
+    apply_plot_font(font_family)
     figout,axout=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
     apply_graph_frame(axout,show_graph_frame,graph_frame_width)
     for n in names:
