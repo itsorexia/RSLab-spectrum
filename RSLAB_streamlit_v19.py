@@ -173,7 +173,7 @@ def parse_upload(upload):
                                        "x":axis_values[good],"raw":intensities[good],
                                        "x_label":"Raman Shift (cm⁻¹)","y_label":"Intensity",
                                        "mapping_type":map_type,"mapping_coordinate":map_coordinate,
-                                       "mapping_source":file_stem})
+                                       "mapping_source":upload.name})
                 if series:
                     return series
 
@@ -711,18 +711,39 @@ def render_blank_spectrum(prefix):
     config={col:st.column_config.NumberColumn(str(col),format="%.8g") for col in columns}
     edited=st.data_editor(sheet_data,num_rows="dynamic",use_container_width=True,hide_index=True,
                           height=420,key=editor_key,column_config=config,placeholder="")
+    # Build a live preview from the current editor state. This runs on every
+    # data_editor change, so users can see the trace before adding it to the app.
+    x_values=pd.to_numeric(edited["X"],errors="coerce").to_numpy(float)
+    y_columns=[col for col in edited.columns if col!="X"]
+    preview_curves=[]
+    for col in y_columns:
+        y_values=pd.to_numeric(edited[col],errors="coerce").to_numpy(float)
+        valid=np.isfinite(x_values)&np.isfinite(y_values)
+        if int(valid.sum())>0:
+            curve_name=str(new_name).strip() or "새 스펙트럼"
+            if len(y_columns)>1:
+                curve_name=f"{curve_name} · {col}"
+            preview_curves.append((curve_name,x_values[valid],y_values[valid]))
+    st.markdown("**입력 데이터 미리보기**")
+    preview_fig,preview_ax=plt.subplots(figsize=(8,3.4))
+    for curve_name,preview_x,preview_y in preview_curves:
+        preview_ax.plot(preview_x,preview_y,marker="o",markersize=3,label=curve_name)
+    preview_ax.set_xlabel(str(x_label).strip() or "X")
+    preview_ax.set_ylabel(str(y_label).strip() or "Intensity")
+    preview_ax.grid(True,alpha=.25)
+    if preview_curves:
+        preview_ax.legend()
+    else:
+        preview_ax.text(.5,.5,"X와 Y 값을 입력하면 곡선이 여기에 표시됩니다.",
+                        ha="center",va="center",transform=preview_ax.transAxes,color="#64748b")
+    st.pyplot(preview_fig,use_container_width=True)
+    plt.close(preview_fig)
     if st.button("입력한 데이터로 그래프 그리기",type="primary",key=f"{prefix}_add"):
-        x=pd.to_numeric(edited["X"],errors="coerce")
-        base_name=str(new_name).strip() or "새 스펙트럼"
         new_items=[]
-        y_columns=[col for col in edited.columns if col!="X"]
-        for col in y_columns:
-            y=pd.to_numeric(edited[col],errors="coerce")
-            valid=x.notna() & y.notna()
-            if int(valid.sum())<2:
+        for curve_name,preview_x,preview_y in preview_curves:
+            if len(preview_x)<2:
                 continue
-            curve_name=base_name if len(y_columns)==1 else f"{base_name} · {col}"
-            new_items.append({"name":curve_name,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
+            new_items.append({"name":curve_name,"x":preview_x,"raw":preview_y,
                               "x_label":str(x_label).strip() or "X",
                               "y_label":str(y_label).strip() or "Intensity"})
         if not new_items:
@@ -796,6 +817,21 @@ def show_curve_editor():
                           num_rows="dynamic",use_container_width=True,hide_index=True,key=edit_key,
                           column_config={"X":st.column_config.NumberColumn("X",format="%.8g"),
                                          "Y":st.column_config.NumberColumn("Y",format="%.8g")})
+    live_x=pd.to_numeric(edited.get("X",pd.Series(dtype=float)),errors="coerce").to_numpy(float)
+    live_y=pd.to_numeric(edited.get("Y",pd.Series(dtype=float)),errors="coerce").to_numpy(float)
+    live_valid=np.isfinite(live_x)&np.isfinite(live_y)
+    live_fig,live_ax=plt.subplots(figsize=(8,3.2))
+    if int(live_valid.sum()):
+        live_ax.plot(live_x[live_valid],live_y[live_valid],color="#2478b5",linewidth=1.8,marker="o",markersize=3)
+    else:
+        live_ax.text(.5,.5,"X와 Y 값이 입력되면 미리보기가 표시됩니다.",
+                     ha="center",va="center",transform=live_ax.transAxes,color="#64748b")
+    live_ax.set_xlabel(str(curve.get("x_label","X")))
+    live_ax.set_ylabel(str(curve.get("y_label","Intensity")))
+    live_ax.grid(True,alpha=.25)
+    st.markdown("**수정값 미리보기**")
+    st.pyplot(live_fig,use_container_width=True)
+    plt.close(live_fig)
     apply_col,close_col=st.columns(2)
     if apply_col.button("수정 내용 적용",type="primary",key="curve_editor_apply"):
         x=pd.to_numeric(edited.get("X",pd.Series(dtype=float)),errors="coerce")
@@ -820,6 +856,12 @@ if st.session_state.get("curve_editor_open"):
     show_curve_editor()
 mapped=[s for s in series if s.get("mapping_type") in ("time","space")]
 spatial=[s for s in mapped if s.get("mapping_type")=="space" and isinstance(s.get("mapping_coordinate"),(tuple,list)) and len(s["mapping_coordinate"])>=2]
+mapped_source_groups={}
+for spec in mapped:
+    source=spec.get("mapping_source",spec["name"].split(" · ")[0])
+    mapped_source_groups.setdefault(source,[]).append(spec)
+mapped_sources=list(mapped_source_groups)
+mapped_names={s["name"] for s in mapped}
 with st.sidebar:
     if spatial:
         st.markdown("**공간 위치 선택**")
@@ -852,9 +894,11 @@ with st.sidebar:
                 if picked_name in names:
                     picked_names.append(picked_name)
             if picked_names:
-                mapped_names={s["name"] for s in mapped}
-                ordinary_selected=[n for n in st.session_state["graph_selected"] if n not in mapped_names]
-                st.session_state["graph_selected"]=list(dict.fromkeys([*ordinary_selected,*picked_names]))
+                file_names={s["name"] for s in map_specs}
+                other_selected=[n for n in st.session_state.get("graph_selected",[]) if n not in file_names]
+                st.session_state["graph_selected"]=list(dict.fromkeys([*other_selected,*picked_names]))
+                group_key=f"mapped_curve_selection::{chosen_source}"
+                st.session_state[group_key]=picked_names
                 st.caption(f"선택한 좌표: {len(picked_names)}개")
         except (AttributeError,KeyError,TypeError,IndexError):
             pass
@@ -871,8 +915,29 @@ def selection_label(name):
     value=coord[0] if isinstance(coord,(tuple,list)) else coord
     return f"{short_stem} · 시간={value:g}"
 with st.sidebar:
-    st.multiselect("그릴 스펙트럼 선택",names,key="graph_selected",format_func=selection_label,help="공간 맵에서 점 하나 또는 여러 개를 선택할 수 있습니다. 시간 매핑은 시간값으로 표시됩니다.")
-tabs=st.tabs(["그래프 및 처리","피크 분석","내보내기","데이터 시트"])
+    st.markdown("**그릴 스펙트럼 선택**")
+    regular_names=[name for name in names if name not in mapped_names]
+    regular_key="graph_selected_regular"
+    regular_values=st.session_state.get(regular_key)
+    if regular_values is None or any(name not in regular_names for name in regular_values):
+        regular_values=[name for name in st.session_state.get("graph_selected",names) if name in regular_names]
+        st.session_state[regular_key]=regular_values
+    st.multiselect("일반 데이터",regular_names,key=regular_key,
+                   help="매핑 파일에 포함되지 않은 스펙트럼입니다.")
+    selected_for_plot=list(st.session_state[regular_key])
+    for source,group_specs in mapped_source_groups.items():
+        group_names=[s["name"] for s in group_specs]
+        group_key=f"mapped_curve_selection::{source}"
+        group_values=st.session_state.get(group_key)
+        if group_values is None or any(name not in group_names for name in group_values):
+            group_values=[name for name in st.session_state.get("graph_selected",[]) if name in group_names]
+            st.session_state[group_key]=group_values
+        with st.expander(f"{Path(source).name} · {len(group_names)}개",expanded=False):
+            st.multiselect("이 파일에서 그릴 곡선",group_names,key=group_key,
+                           format_func=selection_label,label_visibility="collapsed")
+        selected_for_plot.extend(st.session_state[group_key])
+    st.session_state["graph_selected"]=list(dict.fromkeys(selected_for_plot))
+tabs=st.tabs(["그래프 및 처리","곡선 평균","피크 분석","내보내기","데이터 시트"])
 with st.sidebar:
     st.header("처리")
     normalization_tab,baseline_tab,smoothing_tab=st.tabs(["Normalization","Baseline","SG 필터"])
@@ -980,13 +1045,13 @@ with tabs[0]:
             graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
             old_names=names.copy()
             with st.expander("곡선 순서 변경",expanded=False):
-                st.caption("곡선 옆의 ‘⬆’ 또는 ‘⬇’를 누르면 그래프와 범례 순서가 바뀝니다.")
+                st.caption("곡선 옆의 ‘위로’ 또는 ‘아래로’를 누르면 그래프와 범례 순서가 바뀝니다.")
                 for order_i,curve in enumerate(series):
                     order_name,up_col,down_col=st.columns([6,2,2],vertical_alignment="center")
                     order_name.write(curve["name"])
-                    up_col.button("⬆",key=f"curve_up_{order_i}",disabled=order_i==0,
+                    up_col.button("위로",key=f"curve_up_{order_i}",disabled=order_i==0,
                                   on_click=move_curve,args=(order_i,-1),use_container_width=True)
-                    down_col.button("⬇",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
+                    down_col.button("아래로",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
                                     on_click=move_curve,args=(order_i,1),use_container_width=True)
             st.markdown("**곡선 색상 및 선 굵기**")
             for i,s in enumerate(series):
@@ -1015,15 +1080,6 @@ with tabs[0]:
             if "graph_average_targets" in st.session_state:
                 st.session_state["graph_average_targets"]=[renamed.get(name,name) for name in st.session_state["graph_average_targets"]]
             names=[s["name"] for s in series]
-            st.markdown("**평균 곡선**")
-            average_enabled=st.checkbox("선택 곡선 평균을 그래프에 표시",value=False,key="graph_average_enabled")
-            average_axis_labels=list(dict.fromkeys(str(s.get("x_label","X")) for s in series))
-            average_axis=st.selectbox("평균 계산 X축",average_axis_labels,key="graph_average_axis")
-            average_candidates=[s["name"] for s in series if str(s.get("x_label","X"))==average_axis]
-            average_default=[n for n in selected if n in average_candidates]
-            average_targets=st.multiselect("평균에 포함할 곡선",average_candidates,default=average_default,
-                                           key="graph_average_targets")
-            st.caption("현재 SG 필터·baseline·normalization을 각 곡선에 적용한 뒤, 공통 X 범위에서 평균합니다. X 간격이 다르면 첫 곡선의 X 좌표에 맞춰 보간합니다.")
 
         with size_tab:
             size_mode="전체 이미지 기준"
@@ -1152,7 +1208,6 @@ with tabs[0]:
         fig,ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
         apply_graph_frame(ax,show_graph_frame,graph_frame_width)
         proc={s["name"]:transform(s,opts) for s in series}
-        average_curve=compute_average_curve(average_targets,series,proc,average_axis) if average_enabled else None
         # Base the automatic vertical stack spacing on the visible X range.
         # This keeps the gaps proportional when the user zooms into a narrower range.
         x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
@@ -1171,21 +1226,11 @@ with tabs[0]:
             s=next(z for z in series if z["name"]==n)
             off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
             ax.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
-        if average_enabled:
-            if average_curve is None:
-                st.warning("평균 곡선을 만들 수 없습니다. 같은 X축의 곡선을 2개 이상 선택하고 공통 X 범위를 확인하세요.")
-            else:
-                ax.plot(average_curve["x"],average_curve["y"],label=average_curve["name"],
-                        color="#d62728",linestyle="--",linewidth=max(float(line_width),2.0),zorder=5)
         ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
         if y_auto:
             visible_limits=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
             if visible_limits:
                 ylo,yhi=visible_limits
-                if average_curve is not None:
-                    avg_mask=(average_curve["x"]>=min(xmin,xmax))&(average_curve["x"]<=max(xmin,xmax))
-                    avg_y=average_curve["y"][avg_mask]
-                    if len(avg_y): ylo=min(ylo,float(np.nanmin(avg_y))); yhi=max(yhi,float(np.nanmax(avg_y)))
                 ax.set_ylim(ylo,yhi)
         else: ax.set_ylim(min(ymin,ymax),max(ymin,ymax))
         ax.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); ax.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
@@ -1203,6 +1248,41 @@ with tabs[0]:
         st.caption(f"곡선 {len(series)}개 · 원본 데이터는 전체 해상도로 분석/내보내기합니다.")
 
 with tabs[1]:
+    st.subheader("선택 곡선 평균")
+    st.caption("현재 사이드바의 SG 필터·baseline·normalization 처리를 반영해 평균을 계산합니다. X 간격이 서로 다르면 첫 곡선의 X 좌표에 맞춰 보간하고, 공통 X 범위만 사용합니다.")
+    average_axis_labels=list(dict.fromkeys(str(s.get("x_label","X")) for s in series))
+    average_axis=st.selectbox("평균 계산 X축",average_axis_labels,key="graph_average_axis")
+    average_candidates=[s["name"] for s in series if str(s.get("x_label","X"))==average_axis]
+    average_default=[n for n in selected if n in average_candidates]
+    if "graph_average_targets" in st.session_state:
+        st.session_state["graph_average_targets"]=[n for n in st.session_state["graph_average_targets"] if n in average_candidates]
+    else:
+        st.session_state["graph_average_targets"]=average_default
+    average_targets=st.multiselect("평균에 포함할 곡선",average_candidates,key="graph_average_targets")
+    average_enabled=st.checkbox("평균 곡선 계산",value=True,key="graph_average_enabled")
+    average_curve=compute_average_curve(average_targets,series,proc,average_axis) if average_enabled else None
+    if not average_enabled:
+        st.info("평균 곡선 계산을 켜면 선택한 곡선의 평균 그래프와 다운로드를 표시합니다.")
+    elif average_curve is None:
+        st.warning("평균을 계산하려면 같은 X축을 사용하는 곡선을 2개 이상 선택하고, 서로 겹치는 X 범위가 있어야 합니다.")
+    else:
+        average_fig,average_ax=plt.subplots(figsize=(9,4.5))
+        average_ax.plot(average_curve["x"],average_curve["y"],color="#d62728",linewidth=2,label=average_curve["name"])
+        average_ax.set_xlabel(format_axis_label(average_axis))
+        average_ax.set_ylabel(format_axis_label(str(next((s.get("y_label","Intensity") for s in series if s["name"] in average_targets),"Intensity"))))
+        average_ax.grid(True,alpha=.3)
+        average_ax.legend()
+        st.pyplot(average_fig,use_container_width=True)
+        plt.close(average_fig)
+        average_table=pd.DataFrame({"X":average_curve["x"],average_curve["name"]:average_curve["y"]})
+        avg_csv_col,avg_txt_col=st.columns(2)
+        avg_csv_col.download_button("평균 곡선 CSV",average_table.to_csv(index=False).encode("utf-8-sig"),
+                                    "average_spectrum.csv","text/csv",key="average_curve_csv",use_container_width=True)
+        avg_txt_col.download_button("평균 곡선 TXT",average_table.to_csv(index=False,sep="\t").encode("utf-8-sig"),
+                                    "average_spectrum.txt","text/plain",key="average_curve_txt",use_container_width=True)
+        st.caption(f"평균 포함 곡선 {average_curve['count']}개 · 공통 X 범위 {average_curve['x'][0]:g}–{average_curve['x'][-1]:g}")
+
+with tabs[2]:
     peak_tab,max_tab,range_stats_tab=st.tabs(["피크 찾기","맥스 인텐시티","범위 통계"])
     with peak_tab:
         st.subheader("피크 찾기")
@@ -1343,7 +1423,7 @@ with tabs[1]:
             else:
                 st.info("입력한 X 범위 안에 유효한 데이터가 없습니다.")
 
-with tabs[2]:
+with tabs[3]:
     st.subheader("그래프 저장")
     apply_plot_font(font_family)
     figout,axout=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
@@ -1353,18 +1433,11 @@ with tabs[2]:
             s=next(z for z in series if z["name"]==n)
             off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
             axout.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
-    if average_enabled and average_curve is not None:
-        axout.plot(average_curve["x"],average_curve["y"],label=average_curve["name"],
-                   color="#d62728",linestyle="--",linewidth=max(float(line_width),2.0),zorder=5)
     axout.set_xlim(min(xmin,xmax),max(xmin,xmax))
     if y_auto:
         visible_limits=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
         if visible_limits:
             ylo,yhi=visible_limits
-            if average_enabled and average_curve is not None:
-                avg_mask=(average_curve["x"]>=min(xmin,xmax))&(average_curve["x"]<=max(xmin,xmax))
-                avg_y=average_curve["y"][avg_mask]
-                if len(avg_y): ylo=min(ylo,float(np.nanmin(avg_y))); yhi=max(yhi,float(np.nanmax(avg_y)))
             axout.set_ylim(ylo,yhi)
     else: axout.set_ylim(min(ymin,ymax),max(ymin,ymax))
     axout.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); axout.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
@@ -1381,14 +1454,6 @@ with tabs[2]:
     st.download_button(f"그래프 PNG ({canvas_width_px} × {canvas_height_px} px)",png_data,"spectrum.png","image/png")
     st.caption(f"플롯 박스: {plot_box_width} × {plot_box_height} px · 전체 PNG: {canvas_width_px} × {canvas_height_px} px · DPI: {export_dpi}")
     st.subheader("데이터 파일 저장")
-    if average_enabled and average_curve is not None:
-        average_table=pd.DataFrame({"X":average_curve["x"],average_curve["name"]:average_curve["y"]})
-        avg_csv_col,avg_txt_col=st.columns(2)
-        avg_csv_col.download_button("평균 곡선 CSV",average_table.to_csv(index=False).encode("utf-8-sig"),
-                                    "average_spectrum.csv","text/csv",key="average_curve_csv",use_container_width=True)
-        avg_txt_col.download_button("평균 곡선 TXT",average_table.to_csv(index=False,sep="\t").encode("utf-8-sig"),
-                                    "average_spectrum.txt","text/plain",key="average_curve_txt",use_container_width=True)
-        st.caption(f"평균에 포함된 곡선: {average_curve['count']}개 · 공통 X 범위: {average_curve['x'][0]:g}–{average_curve['x'][-1]:g}")
     st.markdown("<style>div[data-testid='stDownloadButton'] button{max-width:350px !important;width:100% !important;}</style>",unsafe_allow_html=True)
     selected_targets=[n for n in selected if n in names]
     raw_values={s["name"]:np.asarray(s["raw"],dtype=float) for s in series}
@@ -1423,7 +1488,7 @@ with tabs[2]:
     c2.download_button("곡선별 보정 TXT ZIP",curve_archive(names,series,corrected_values,"txt"),
                        "spectra_corrected_txt.zip","application/zip",disabled=not names,use_container_width=True)
 
-with tabs[3]:
+with tabs[4]:
     st.subheader("불러온 데이터 편집")
     st.caption("곡선을 선택하고 편집 창을 열면 X/Y 값을 스프레드시트처럼 수정할 수 있습니다. 수정한 값은 그래프와 내보내기에 반영됩니다.")
     edit_names=[s["name"] for s in st.session_state.series]
