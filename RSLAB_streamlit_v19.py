@@ -1191,11 +1191,21 @@ with tabs[0]:
         apply_plot_font(font_family)
         preview_mpl_fig,preview_ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
         apply_graph_frame(preview_ax,show_graph_frame,graph_frame_width)
+        hover_curves=[]
         for n in names:
             if n in selected:
                 s=next(z for z in series if z["name"]==n)
                 off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
-                preview_ax.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
+                curve_x=np.asarray(s["x"],dtype=float)
+                curve_y=np.asarray(proc[n],dtype=float)+off
+                preview_ax.plot(curve_x,curve_y,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
+                valid=np.isfinite(curve_x)&np.isfinite(curve_y)
+                valid_indices=np.flatnonzero(valid)
+                if len(valid_indices)>20000:
+                    valid_indices=valid_indices[np.linspace(0,len(valid_indices)-1,20000,dtype=int)]
+                order=np.argsort(curve_x[valid_indices])
+                hover_curves.append({"name":n,"x":curve_x[valid_indices][order].tolist(),
+                                     "y":curve_y[valid_indices][order].tolist()})
         preview_ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
         if y_auto:
             visible_limits=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
@@ -1241,9 +1251,15 @@ with tabs[0]:
         const hy=document.getElementById('horizontal');
         const readout=document.getElementById('readout');
         const plot={plot};
+        const curves={curves};
         const width={width}, height={height};
         const xlim={xlim}, ylim={ylim};
         const enabled={enabled};
+        function lowerBound(values,target){{
+          let lo=0,hi=values.length;
+          while(lo<hi){{const mid=(lo+hi)>>1;if(values[mid]<target)lo=mid+1;else hi=mid;}}
+          return lo;
+        }}
         if(enabled){{
           stage.addEventListener('pointermove',(event)=>{{
             const rect=stage.getBoundingClientRect();
@@ -1254,16 +1270,29 @@ with tabs[0]:
             }}
             const valueX=xlim[0]+(x-plot.left)/plot.width*(xlim[1]-xlim[0]);
             const valueY=ylim[1]-(y-plot.top)/plot.height*(ylim[1]-ylim[0]);
+            let closest=null,closestDistance=20*20;
+            for(const curve of curves){{
+              const i=lowerBound(curve.x,valueX);
+              for(let j=Math.max(0,i-2);j<Math.min(curve.x.length,i+2);j++){{
+                const px=plot.left+(curve.x[j]-xlim[0])/ (xlim[1]-xlim[0])*plot.width;
+                const py=plot.top+(ylim[1]-curve.y[j])/(ylim[1]-ylim[0])*plot.height;
+                const distance=(px-x)*(px-x)+(py-y)*(py-y);
+                if(distance<closestDistance){{closestDistance=distance;closest={{name:curve.name,x:curve.x[j],y:curve.y[j]}};}}
+              }}
+            }}
             vx.setAttribute('x1',x); vx.setAttribute('x2',x);
             vx.setAttribute('y1',plot.top); vx.setAttribute('y2',plot.top+plot.height);
             hy.setAttribute('x1',plot.left); hy.setAttribute('x2',plot.left+plot.width);
             hy.setAttribute('y1',y); hy.setAttribute('y2',y);
-            svg.style.display='block'; readout.textContent='X: '+Number(valueX.toPrecision(6))+'   Y: '+Number(valueY.toPrecision(6));
+            svg.style.display='block';
+            readout.textContent='커서  X: '+Number(valueX.toPrecision(6))+'   Y: '+Number(valueY.toPrecision(6))+
+              (closest?'\\n'+closest.name+'  X: '+Number(closest.x.toPrecision(6))+'   Y: '+Number(closest.y.toPrecision(6)):'');
             readout.style.display='block';
           }});
           stage.addEventListener('pointerleave',()=>{{svg.style.display='none';readout.style.display='none';}});
         }}
-        """.format(plot=json.dumps(overlay_box),width=canvas_width_px,height=canvas_height_px,
+        """.format(plot=json.dumps(overlay_box),curves=json.dumps(hover_curves,ensure_ascii=False,separators=(",",":")),
+                   width=canvas_width_px,height=canvas_height_px,
                    xlim=json.dumps([float(preview_x_limits[0]),float(preview_x_limits[1])]),
                    ylim=json.dumps([float(preview_y_limits[0]),float(preview_y_limits[1])]),
                    enabled="true" if crosshair_enabled else "false")
@@ -1274,14 +1303,15 @@ with tabs[0]:
         #crosshair{{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none}}
         #crosshair line{{stroke:#566573;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke}}
         #readout{{display:none;position:absolute;right:7px;top:7px;padding:4px 7px;border:1px solid #aeb8c2;
-          border-radius:4px;background:rgba(255,255,255,.94);color:#263238;font:12px Arial,sans-serif;pointer-events:none}}
+          border-radius:4px;background:rgba(255,255,255,.94);color:#263238;font:12px Arial,sans-serif;
+          white-space:pre-line;pointer-events:none}}
         </style></head><body><div id="stage">
         <img id="graph" src="data:image/png;base64,{preview_image_b64}" alt="그래프 미리보기">
         <svg id="crosshair" viewBox="0 0 {canvas_width_px} {canvas_height_px}" preserveAspectRatio="none">
           <line id="vertical"></line><line id="horizontal"></line></svg>
         <div id="readout"></div></div><script>{crosshair_script}</script></body></html>"""
         components.html(preview_html,width=canvas_width_px,height=canvas_height_px,scrolling=False)
-        st.caption("그래프 위에 마우스를 올리면 십자선과 해당 위치의 X/Y 좌표가 표시됩니다.")
+        st.caption("그래프 위에 마우스를 올리면 십자선의 X/Y 좌표와 가까운 곡선의 이름 및 실제 데이터 X/Y 값이 표시됩니다.")
         st.caption(f"캔버스 {canvas_width_px} × {canvas_height_px} px · 플롯 박스 {plot_box_width} × {plot_box_height} px · 곡선 {len(series)}개")
 
 with tabs[1]:
