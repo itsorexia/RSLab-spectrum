@@ -1020,23 +1020,35 @@ with tabs[0]:
                     down_col.button("아래로",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
                                     on_click=move_curve,args=(order_i,1),use_container_width=True)
             st.markdown("**곡선 색상 및 선 굵기**")
+            selected_style_names=set(selected)
             for i,s in enumerate(series):
-                with st.container(border=True):
-                    if palette=="업로드 팔레트" and uploaded_palette:
-                        palette_color=interpolate_palette(uploaded_palette,len(series),i)
-                    else:
-                        palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
-                    name_col,color_col=st.columns([8,1],vertical_alignment="center")
-                    s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
-                                                  label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
-                    if color_mode=="곡선별 지정":
-                        curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
-                                                           label_visibility="collapsed")
-                    else:
-                        curve_color=palette_color
-                        color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
-                    curve_width=synced_float_control("개별 선 굵기",0.5,10.0,float(line_width),0.1,f"lw_{i}") if width_mode=="곡선별 지정" else float(line_width)
-                    style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
+                if palette=="업로드 팔레트" and uploaded_palette:
+                    palette_color=interpolate_palette(uploaded_palette,len(series),i)
+                else:
+                    palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
+                if s["name"] in selected_style_names:
+                    with st.container(border=True):
+                        name_col,color_col=st.columns([8,1],vertical_alignment="center")
+                        s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
+                                                      label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
+                        if color_mode=="곡선별 지정":
+                            curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
+                                                               label_visibility="collapsed")
+                        else:
+                            curve_color=palette_color
+                            color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
+                        curve_width=(synced_float_control("개별 선 굵기",0.5,10.0,float(line_width),0.1,f"lw_{i}")
+                                     if width_mode=="곡선별 지정" else float(line_width))
+                else:
+                    # Keep hidden curves' style available to other views without rendering
+                    # editors for spectra that are not currently selected.
+                    curve_color=(st.session_state.get(f"color_{i}",palette_color)
+                                 if color_mode=="곡선별 지정" else palette_color)
+                    curve_width=(float(st.session_state.get(f"lw_{i}",st.session_state.get(f"lw_{i}_input",line_width)))
+                                 if width_mode=="곡선별 지정" else float(line_width))
+                style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
+            if not selected_style_names:
+                st.caption("색상과 굵기를 설정할 스펙트럼을 먼저 선택하세요.")
             curve_name_error=st.session_state.pop("curve_name_error",None)
             if curve_name_error:
                 st.error(curve_name_error)
