@@ -1031,19 +1031,41 @@ with tabs[0]:
                 if s["name"] in selected_style_names:
                     with st.container(border=True):
                         if palette=="업로드 팔레트" and uploaded_palette:
-                            name_col,color_col,swatch_col=st.columns([6,3,1],vertical_alignment="center")
+                            name_col=st.container()
                             s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
                                                           label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
                             palette_key=f"uploaded_palette_curve_color_{i}"
                             if st.session_state.get(palette_key) not in uploaded_palette:
-                                st.session_state.pop(palette_key,None)
-                            curve_color=color_col.selectbox(
-                                "팔레트 색상",uploaded_palette,index=palette_index,key=palette_key,
-                                label_visibility="collapsed",
-                                format_func=lambda color: f"{uploaded_palette.index(color)+1} · {color}")
-                            swatch_col.markdown(
-                                f"<div title='{curve_color}' style='width:28px;height:26px;background:{curve_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",
-                                unsafe_allow_html=True)
+                                st.session_state[palette_key]=palette_color
+                            st.caption("사용할 색상을 눌러 선택하세요.")
+                            for row_start in range(0,len(uploaded_palette),8):
+                                row_colors=uploaded_palette[row_start:row_start+8]
+                                swatch_cols=st.columns(len(row_colors),gap="small")
+                                css_rules=[]
+                                for row_index,color in enumerate(row_colors):
+                                    color_index=row_start+row_index
+                                    swatch_key=f"uploaded_palette_swatch_{i}_{color_index}"
+                                    is_current=st.session_state[palette_key]==color
+                                    rgb=np.asarray(to_rgb(color))
+                                    foreground="#111827" if float(np.dot(rgb,[0.299,0.587,0.114]))>0.58 else "#ffffff"
+                                    border="#17202a" if is_current else "#d1d5db"
+                                    css_rules.append(
+                                        f".st-key-{swatch_key} button{{background-color:{color}!important;"
+                                        f"color:{foreground}!important;border:2px solid {border}!important;"
+                                        "height:32px;min-height:32px;padding:0!important;border-radius:6px!important;"
+                                        "font-size:17px!important;line-height:1!important;}"
+                                        f".st-key-{swatch_key} button:hover{{filter:brightness(.88);border-color:#111827!important;}}")
+                                st.markdown("<style>"+"".join(css_rules)+"</style>",unsafe_allow_html=True)
+                                for row_index,color in enumerate(row_colors):
+                                    color_index=row_start+row_index
+                                    swatch_key=f"uploaded_palette_swatch_{i}_{color_index}"
+                                    with swatch_cols[row_index]:
+                                        if st.button("✓" if st.session_state[palette_key]==color else " ",
+                                                      key=swatch_key,help=f"팔레트 색상 {color_index+1}: {color}",
+                                                      use_container_width=True):
+                                            st.session_state[palette_key]=color
+                                            st.rerun()
+                            curve_color=st.session_state[palette_key]
                         else:
                             name_col,color_col=st.columns([8,1],vertical_alignment="center")
                             s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
