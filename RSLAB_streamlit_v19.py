@@ -1003,6 +1003,7 @@ with tabs[0]:
                 for j,color in enumerate(uploaded_palette):
                     with preview_cols[j%len(preview_cols)]:
                         st.markdown(f"<div title='{color}' style='height:22px;background:{color};border:1px solid #d1d5db;border-radius:5px'></div><small>{color}</small>",unsafe_allow_html=True)
+                st.caption("각 선택 곡선의 메뉴에서 사용할 팔레트 색을 직접 고를 수 있습니다.")
             color_mode=st.radio("색상 설정",["팔레트 사용","곡선별 지정"],horizontal=True,key="graph_color_mode")
             width_mode=st.radio("선 굵기 설정",["전체 동일","곡선별 지정"],horizontal=True,key="graph_width_mode")
             line_width=synced_float_control("전체 선 굵기",0.5,5.0,1.8,0.1,"graph_line_width")
@@ -1023,27 +1024,48 @@ with tabs[0]:
             selected_style_names=set(selected)
             for i,s in enumerate(series):
                 if palette=="업로드 팔레트" and uploaded_palette:
-                    palette_color=interpolate_palette(uploaded_palette,len(series),i)
+                    palette_index=round(i*(len(uploaded_palette)-1)/max(1,len(series)-1))
+                    palette_color=uploaded_palette[palette_index]
                 else:
                     palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
                 if s["name"] in selected_style_names:
                     with st.container(border=True):
-                        name_col,color_col=st.columns([8,1],vertical_alignment="center")
-                        s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
-                                                      label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
-                        if color_mode=="곡선별 지정":
-                            curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
-                                                               label_visibility="collapsed")
+                        if palette=="업로드 팔레트" and uploaded_palette:
+                            name_col,color_col,swatch_col=st.columns([6,3,1],vertical_alignment="center")
+                            s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
+                                                          label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
+                            palette_key=f"uploaded_palette_curve_color_{i}"
+                            if st.session_state.get(palette_key) not in uploaded_palette:
+                                st.session_state.pop(palette_key,None)
+                            curve_color=color_col.selectbox(
+                                "팔레트 색상",uploaded_palette,index=palette_index,key=palette_key,
+                                label_visibility="collapsed",
+                                format_func=lambda color: f"{uploaded_palette.index(color)+1} · {color}")
+                            swatch_col.markdown(
+                                f"<div title='{curve_color}' style='width:28px;height:26px;background:{curve_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",
+                                unsafe_allow_html=True)
                         else:
-                            curve_color=palette_color
-                            color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
+                            name_col,color_col=st.columns([8,1],vertical_alignment="center")
+                            s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
+                                                          label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
+                            if color_mode=="곡선별 지정":
+                                curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
+                                                                   label_visibility="collapsed")
+                            else:
+                                curve_color=palette_color
+                                color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
                         curve_width=(synced_float_control("개별 선 굵기",0.5,10.0,float(line_width),0.1,f"lw_{i}")
                                      if width_mode=="곡선별 지정" else float(line_width))
                 else:
                     # Keep hidden curves' style available to other views without rendering
                     # editors for spectra that are not currently selected.
-                    curve_color=(st.session_state.get(f"color_{i}",palette_color)
-                                 if color_mode=="곡선별 지정" else palette_color)
+                    if palette=="업로드 팔레트" and uploaded_palette:
+                        palette_key=f"uploaded_palette_curve_color_{i}"
+                        saved_palette_color=st.session_state.get(palette_key)
+                        curve_color=saved_palette_color if saved_palette_color in uploaded_palette else palette_color
+                    else:
+                        curve_color=(st.session_state.get(f"color_{i}",palette_color)
+                                     if color_mode=="곡선별 지정" else palette_color)
                     curve_width=(float(st.session_state.get(f"lw_{i}",st.session_state.get(f"lw_{i}_input",line_width)))
                                  if width_mode=="곡선별 지정" else float(line_width))
                 style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
