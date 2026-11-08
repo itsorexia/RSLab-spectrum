@@ -1203,8 +1203,10 @@ with tabs[0]:
             spikedistance=-1,
             showlegend=legend,
             legend={"font":{"size":legend_font_size},"x":1,"y":1,"xanchor":"right","yanchor":"top"},
-            height=max(360,int(canvas_height_px*1.2)),
-            margin={"l":70,"r":25,"t":55 if title else 25,"b":65},
+            width=canvas_width_px,
+            height=canvas_height_px,
+            margin={"l":int(plot_margins[0]),"r":int(plot_margins[1]),
+                    "t":int(plot_margins[2]),"b":int(plot_margins[3])},
             plot_bgcolor="white",
             paper_bgcolor="white")
         preview_fig.update_xaxes(
@@ -1261,10 +1263,10 @@ with tabs[0]:
             }
             preview_fig.update_layout(legend=legend_coordinates.get(legend_position,legend_coordinates["자동 (겹침 최소화)"]))
         preview_fig.update_layout(hoverlabel={"namelength":-1})
-        st.plotly_chart(preview_fig,use_container_width=True,key="graph_interactive_preview",
+        st.plotly_chart(preview_fig,use_container_width=False,key="graph_interactive_preview",
                         config={"displaylogo":False,"scrollZoom":True})
         st.caption("그래프 위에 마우스를 올리면 십자선과 축 좌표가 표시됩니다. 선 가까이에서는 가장 가까운 데이터의 X/Y 값도 확인할 수 있습니다.")
-        st.caption(f"곡선 {len(series)}개 · 원본 데이터는 전체 해상도로 분석/내보내기합니다.")
+        st.caption(f"캔버스 {canvas_width_px} × {canvas_height_px} px · 플롯 박스 {plot_box_width} × {plot_box_height} px · 곡선 {len(series)}개")
 
 with tabs[1]:
     st.subheader("선택 곡선 평균")
