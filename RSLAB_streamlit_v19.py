@@ -455,11 +455,11 @@ def tick_scale_annotation(options):
         return rf"$\times 10^{{{exponent}}}$"
     return rf"$\times {factor:g}$"
 
-def add_y_scale_annotation(ax, options, fontsize):
+def add_y_scale_annotation(ax, options, fontsize, color="black"):
     label=tick_scale_annotation(options)
     if label:
         # Anchor the scale label just above the plotting box's upper-left corner.
-        ax.text(0.0,1.005,label,transform=ax.transAxes,ha="left",va="bottom",fontsize=fontsize,clip_on=False)
+        ax.text(0.0,1.005,label,transform=ax.transAxes,ha="left",va="bottom",fontsize=fontsize,color=color,clip_on=False)
 
 def apply_graph_frame(ax, visible, linewidth):
     # Keep the X/Y axes visible; the frame toggle controls only the top/right box edges.
@@ -1102,6 +1102,7 @@ with tabs[0]:
             font_family=st.selectbox("글꼴",font_options,index=font_options.index("Arial"),key="graph_font_family")
             if not font_family_available(font_family):
                 st.warning(f"{font_family} 글꼴 파일을 찾을 수 없습니다. 저장소의 fonts 폴더에 글꼴 파일을 넣어야 실제로 적용됩니다.")
+            axis_text_color=st.color_picker("축 글씨 색상",value="#000000",key="graph_axis_text_color")
             axis_label_size=synced_font_control("축 제목 글자 크기",6,40,12,"graph_axis_font_size")
             title_font_size=synced_font_control("그래프 제목 글자 크기",6,48,14,"graph_title_font_size")
             tick_font_size=synced_font_control("눈금 글자 크기",6,32,10,"graph_tick_font_size")
@@ -1197,7 +1198,7 @@ with tabs[0]:
             xaxis_title=format_axis_label(xlab),
             yaxis_title=format_axis_label(ylab),
             font={"family":font_family,"size":tick_font_size},
-            title_font={"family":font_family,"size":title_font_size},
+            title_font={"family":font_family,"size":title_font_size,"color":axis_text_color},
             hovermode="closest",
             hoverdistance=100,
             spikedistance=-1,
@@ -1211,8 +1212,8 @@ with tabs[0]:
             paper_bgcolor="white")
         preview_fig.update_xaxes(
             range=[min(xmin,xmax),max(xmin,xmax)],
-            title_font={"family":font_family,"size":axis_label_size},
-            tickfont={"family":font_family,"size":tick_font_size},
+            title_font={"family":font_family,"size":axis_label_size,"color":axis_text_color},
+            tickfont={"family":font_family,"size":tick_font_size,"color":axis_text_color},
             showgrid=grid,gridcolor="#d9d9d9",gridwidth=1,
             zeroline=False,
             showline=True,linewidth=graph_frame_width,linecolor="black",
@@ -1230,8 +1231,8 @@ with tabs[0]:
         preview_y_min,preview_y_max=preview_y_range
         preview_fig.update_yaxes(
             range=[preview_y_min,preview_y_max],
-            title_font={"family":font_family,"size":axis_label_size},
-            tickfont={"family":font_family,"size":tick_font_size},
+            title_font={"family":font_family,"size":axis_label_size,"color":axis_text_color},
+            tickfont={"family":font_family,"size":tick_font_size,"color":axis_text_color},
             showgrid=grid,gridcolor="#d9d9d9",gridwidth=1,
             zeroline=False,
             showline=True,linewidth=graph_frame_width,linecolor="black",
@@ -1273,9 +1274,9 @@ with tabs[0]:
             preview_fig.add_annotation(
                 x=0,y=1.005,xref="paper",yref="paper",text=scale_label,
                 showarrow=False,xanchor="left",yanchor="bottom",
-                font={"family":font_family,"size":tick_font_size,"color":"#333333"})
+                font={"family":font_family,"size":tick_font_size,"color":axis_text_color})
         preview_fig.update_layout(hoverlabel={"namelength":-1})
-        st.plotly_chart(preview_fig,use_container_width=False,key="graph_interactive_preview",
+        st.plotly_chart(preview_fig,use_container_width=False,key="graph_interactive_preview",theme=None,
                         config={"displaylogo":False,"scrollZoom":True})
         st.caption("그래프 위에 마우스를 올리면 십자선과 축 좌표가 표시됩니다. 선 가까이에서는 가장 가까운 데이터의 X/Y 값도 확인할 수 있습니다.")
         st.caption(f"캔버스 {canvas_width_px} × {canvas_height_px} px · 플롯 박스 {plot_box_width} × {plot_box_height} px · 곡선 {len(series)}개")
@@ -1299,10 +1300,12 @@ with tabs[1]:
     elif average_curve is None:
         st.warning("평균을 계산하려면 같은 X축을 사용하는 곡선을 2개 이상 선택하고, 서로 겹치는 X 범위가 있어야 합니다.")
     else:
+        apply_plot_font(font_family)
         average_fig,average_ax=plt.subplots(figsize=(9,4.5))
         average_ax.plot(average_curve["x"],average_curve["y"],color="#d62728",linewidth=2,label=average_curve["name"])
-        average_ax.set_xlabel(format_axis_label(average_axis))
-        average_ax.set_ylabel(format_axis_label(str(next((s.get("y_label","Intensity") for s in series if s["name"] in average_targets),"Intensity"))))
+        average_ax.set_xlabel(format_axis_label(average_axis),fontsize=axis_label_size,color=axis_text_color)
+        average_ax.set_ylabel(format_axis_label(str(next((s.get("y_label","Intensity") for s in series if s["name"] in average_targets),"Intensity"))),fontsize=axis_label_size,color=axis_text_color)
+        average_ax.tick_params(labelsize=tick_font_size,labelcolor=axis_text_color)
         average_ax.grid(True,alpha=.3)
         average_ax.legend()
         st.pyplot(average_fig,use_container_width=True)
@@ -1347,14 +1350,14 @@ with tabs[2]:
                 visible_limits=visible_stack_ylim(series,proc,names,peak_plot_names,auto,offset_step,style,xmin,xmax)
                 if visible_limits: ax2.set_ylim(*visible_limits)
             else: ax2.set_ylim(min(ymin,ymax),max(ymin,ymax))
-            ax2.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); ax2.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
-            ax2.set_title(title or None,fontsize=title_font_size)
-            ax2.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size)
-            ax2.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size)
+            ax2.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color); ax2.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
+            ax2.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
+            ax2.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
+            ax2.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
             if x_tick_interval>0: ax2.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
             if y_tick_interval>0: ax2.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
             ax2.yaxis.set_major_formatter(y_tick_formatter)
-            add_y_scale_annotation(ax2,y_tick_options,tick_font_size)
+            add_y_scale_annotation(ax2,y_tick_options,tick_font_size,axis_text_color)
             if grid: ax2.grid(True,alpha=.3)
             if legend: ax2.legend(fontsize=legend_font_size,loc=legend_loc)
             st.image(render_png_fixed_size(fig2,canvas_width_px,canvas_height_px,preview_dpi),width=canvas_width_px); plt.close(fig2)
@@ -1473,14 +1476,14 @@ with tabs[3]:
             ylo,yhi=visible_limits
             axout.set_ylim(ylo,yhi)
     else: axout.set_ylim(min(ymin,ymax),max(ymin,ymax))
-    axout.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); axout.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
-    axout.set_title(title or None,fontsize=title_font_size)
-    axout.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size)
-    axout.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size)
+    axout.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color); axout.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
+    axout.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
+    axout.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
+    axout.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
     if x_tick_interval>0: axout.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
     if y_tick_interval>0: axout.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
     axout.yaxis.set_major_formatter(y_tick_formatter)
-    add_y_scale_annotation(axout,y_tick_options,tick_font_size)
+    add_y_scale_annotation(axout,y_tick_options,tick_font_size,axis_text_color)
     if legend: axout.legend(fontsize=legend_font_size,loc=legend_loc)
     if grid: axout.grid(True,alpha=.3)
     png_data=render_png_fixed_size(figout,canvas_width_px,canvas_height_px,export_dpi); plt.close(figout)
