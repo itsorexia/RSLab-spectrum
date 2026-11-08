@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 import plotly.express as px
+import plotly.graph_objects as go
 from PIL import Image
 from matplotlib.colors import to_hex, to_rgb
 from matplotlib import font_manager
@@ -711,39 +712,18 @@ def render_blank_spectrum(prefix):
     config={col:st.column_config.NumberColumn(str(col),format="%.8g") for col in columns}
     edited=st.data_editor(sheet_data,num_rows="dynamic",use_container_width=True,hide_index=True,
                           height=420,key=editor_key,column_config=config,placeholder="")
-    # Build a live preview from the current editor state. This runs on every
-    # data_editor change, so users can see the trace before adding it to the app.
-    x_values=pd.to_numeric(edited["X"],errors="coerce").to_numpy(float)
-    y_columns=[col for col in edited.columns if col!="X"]
-    preview_curves=[]
-    for col in y_columns:
-        y_values=pd.to_numeric(edited[col],errors="coerce").to_numpy(float)
-        valid=np.isfinite(x_values)&np.isfinite(y_values)
-        if int(valid.sum())>0:
-            curve_name=str(new_name).strip() or "새 스펙트럼"
-            if len(y_columns)>1:
-                curve_name=f"{curve_name} · {col}"
-            preview_curves.append((curve_name,x_values[valid],y_values[valid]))
-    st.markdown("**입력 데이터 미리보기**")
-    preview_fig,preview_ax=plt.subplots(figsize=(8,3.4))
-    for curve_name,preview_x,preview_y in preview_curves:
-        preview_ax.plot(preview_x,preview_y,marker="o",markersize=3,label=curve_name)
-    preview_ax.set_xlabel(str(x_label).strip() or "X")
-    preview_ax.set_ylabel(str(y_label).strip() or "Intensity")
-    preview_ax.grid(True,alpha=.25)
-    if preview_curves:
-        preview_ax.legend()
-    else:
-        preview_ax.text(.5,.5,"X와 Y 값을 입력하면 곡선이 여기에 표시됩니다.",
-                        ha="center",va="center",transform=preview_ax.transAxes,color="#64748b")
-    st.pyplot(preview_fig,use_container_width=True)
-    plt.close(preview_fig)
     if st.button("입력한 데이터로 그래프 그리기",type="primary",key=f"{prefix}_add"):
+        x=pd.to_numeric(edited["X"],errors="coerce")
+        base_name=str(new_name).strip() or "새 스펙트럼"
         new_items=[]
-        for curve_name,preview_x,preview_y in preview_curves:
-            if len(preview_x)<2:
+        y_columns=[col for col in edited.columns if col!="X"]
+        for col in y_columns:
+            y=pd.to_numeric(edited[col],errors="coerce")
+            valid=x.notna() & y.notna()
+            if int(valid.sum())<2:
                 continue
-            new_items.append({"name":curve_name,"x":preview_x,"raw":preview_y,
+            curve_name=base_name if len(y_columns)==1 else f"{base_name} · {col}"
+            new_items.append({"name":curve_name,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
                               "x_label":str(x_label).strip() or "X",
                               "y_label":str(y_label).strip() or "Intensity"})
         if not new_items:
@@ -817,21 +797,6 @@ def show_curve_editor():
                           num_rows="dynamic",use_container_width=True,hide_index=True,key=edit_key,
                           column_config={"X":st.column_config.NumberColumn("X",format="%.8g"),
                                          "Y":st.column_config.NumberColumn("Y",format="%.8g")})
-    live_x=pd.to_numeric(edited.get("X",pd.Series(dtype=float)),errors="coerce").to_numpy(float)
-    live_y=pd.to_numeric(edited.get("Y",pd.Series(dtype=float)),errors="coerce").to_numpy(float)
-    live_valid=np.isfinite(live_x)&np.isfinite(live_y)
-    live_fig,live_ax=plt.subplots(figsize=(8,3.2))
-    if int(live_valid.sum()):
-        live_ax.plot(live_x[live_valid],live_y[live_valid],color="#2478b5",linewidth=1.8,marker="o",markersize=3)
-    else:
-        live_ax.text(.5,.5,"X와 Y 값이 입력되면 미리보기가 표시됩니다.",
-                     ha="center",va="center",transform=live_ax.transAxes,color="#64748b")
-    live_ax.set_xlabel(str(curve.get("x_label","X")))
-    live_ax.set_ylabel(str(curve.get("y_label","Intensity")))
-    live_ax.grid(True,alpha=.25)
-    st.markdown("**수정값 미리보기**")
-    st.pyplot(live_fig,use_container_width=True)
-    plt.close(live_fig)
     apply_col,close_col=st.columns(2)
     if apply_col.button("수정 내용 적용",type="primary",key="curve_editor_apply"):
         x=pd.to_numeric(edited.get("X",pd.Series(dtype=float)),errors="coerce")
@@ -1203,10 +1168,7 @@ with tabs[0]:
             ymin,ymax=proc_min,proc_max
     with plot_col:
         st.subheader("그래프 미리보기")
-        # Keep the selected typeface for normal text and fall back for missing glyphs.
-        apply_plot_font(font_family)
-        fig,ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
-        apply_graph_frame(ax,show_graph_frame,graph_frame_width)
+        crosshair_enabled=st.checkbox("X/Y 좌표 십자선 표시",value=True,key="graph_crosshair_enabled")
         proc={s["name"]:transform(s,opts) for s in series}
         # Base the automatic vertical stack spacing on the visible X range.
         # This keeps the gaps proportional when the user zooms into a narrower range.
@@ -1221,30 +1183,87 @@ with tabs[0]:
             heights.append(max(peak*1.10,0.01))
         auto={}
         for i,n in enumerate(names): auto[n]=sum(heights[i+1:]) if stack else 0
+        preview_fig=go.Figure()
         for n in names:
             if n not in selected: continue
             s=next(z for z in series if z["name"]==n)
             off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
-            ax.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
-        ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
+            preview_fig.add_trace(go.Scatter(
+                x=s["x"],y=proc[n]+off,name=n,mode="lines",
+                line={"color":style[n]["color"],"width":style[n]["linewidth"]},
+                hovertemplate="X: %{x:.6g}<br>Y: %{y:.6g}<extra>%{fullData.name}</extra>"))
+        preview_fig.update_layout(
+            title=title or None,
+            xaxis_title=format_axis_label(xlab),
+            yaxis_title=format_axis_label(ylab),
+            font={"family":font_family,"size":tick_font_size},
+            title_font={"family":font_family,"size":title_font_size},
+            hovermode="closest",
+            hoverdistance=100,
+            spikedistance=-1,
+            showlegend=legend,
+            legend={"font":{"size":legend_font_size},"x":1,"y":1,"xanchor":"right","yanchor":"top"},
+            height=max(360,int(canvas_height_px*1.2)),
+            margin={"l":70,"r":25,"t":55 if title else 25,"b":65},
+            plot_bgcolor="white",
+            paper_bgcolor="white")
+        preview_fig.update_xaxes(
+            range=[min(xmin,xmax),max(xmin,xmax)],
+            showgrid=grid,gridcolor="#d9d9d9",gridwidth=1,
+            showline=True,linewidth=graph_frame_width,linecolor="black",
+            mirror=show_graph_frame,side="top" if x_top and not x_bottom else "bottom",
+            showticklabels=x_bottom or x_top,ticks="outside",
+            dtick=x_tick_interval if x_tick_interval>0 else None,
+            showspikes=crosshair_enabled,spikemode="across",spikesnap="cursor",
+            spikecolor="#566573",spikethickness=1)
         if y_auto:
-            visible_limits=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
-            if visible_limits:
-                ylo,yhi=visible_limits
-                ax.set_ylim(ylo,yhi)
-        else: ax.set_ylim(min(ymin,ymax),max(ymin,ymax))
-        ax.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size); ax.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size)
-        ax.set_title(title or None,fontsize=title_font_size)
-        ax.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size)
-        ax.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size)
-        if x_tick_interval>0: ax.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
-        if y_tick_interval>0: ax.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
-        ax.yaxis.set_major_formatter(y_tick_formatter)
-        add_y_scale_annotation(ax,y_tick_options,tick_font_size)
-        if grid: ax.grid(True,alpha=.3)
-        if legend: ax.legend(fontsize=legend_font_size,loc=legend_loc)
-        preview_png=render_png_fixed_size(fig,canvas_width_px,canvas_height_px,preview_dpi)
-        st.image(preview_png,width=canvas_width_px); plt.close(fig)
+            preview_y_range=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
+            if preview_y_range is None:
+                preview_y_range=(proc_min,proc_max)
+        else:
+            preview_y_range=(min(ymin,ymax),max(ymin,ymax))
+        preview_y_min,preview_y_max=preview_y_range
+        preview_fig.update_yaxes(
+            range=[preview_y_min,preview_y_max],
+            showgrid=grid,gridcolor="#d9d9d9",gridwidth=1,
+            showline=True,linewidth=graph_frame_width,linecolor="black",
+            mirror=show_graph_frame,side="right" if y_right and not y_left else "left",
+            showticklabels=y_left or y_right,ticks="outside",
+            dtick=y_tick_interval if y_tick_interval>0 else None,
+            showspikes=crosshair_enabled,spikemode="across",spikesnap="cursor",
+            spikecolor="#566573",spikethickness=1)
+        custom_y_tick_format=bool(
+            y_tick_options.get("formula","").strip() or
+            y_tick_options.get("unit","없음")!="없음" or
+            y_tick_options.get("decimal_enabled") or
+            y_tick_options.get("prefix") or y_tick_options.get("suffix") or
+            y_tick_options.get("plus_sign"))
+        if custom_y_tick_format:
+            tick_step=float(y_tick_interval) if y_tick_interval>0 else max((preview_y_max-preview_y_min)/5,1e-12)
+            tick_start=np.ceil(preview_y_min/tick_step)*tick_step
+            tick_values=np.arange(tick_start,preview_y_max+tick_step*.5,tick_step)
+            if len(tick_values)>100:
+                tick_values=tick_values[::int(np.ceil(len(tick_values)/100))]
+            preview_fig.update_yaxes(tickmode="array",tickvals=tick_values.tolist(),
+                                     ticktext=[y_tick_formatter(float(value),i) for i,value in enumerate(tick_values)])
+        if legend:
+            legend_coordinates={
+                "자동 (겹침 최소화)":{"x":1,"y":1,"xanchor":"right","yanchor":"top"},
+                "오른쪽 위":{"x":1,"y":1,"xanchor":"right","yanchor":"top"},
+                "왼쪽 위":{"x":0,"y":1,"xanchor":"left","yanchor":"top"},
+                "왼쪽 아래":{"x":0,"y":0,"xanchor":"left","yanchor":"bottom"},
+                "오른쪽 아래":{"x":1,"y":0,"xanchor":"right","yanchor":"bottom"},
+                "오른쪽 가운데":{"x":1,"y":0.5,"xanchor":"right","yanchor":"middle"},
+                "왼쪽 가운데":{"x":0,"y":0.5,"xanchor":"left","yanchor":"middle"},
+                "위 가운데":{"x":0.5,"y":1,"xanchor":"center","yanchor":"top"},
+                "아래 가운데":{"x":0.5,"y":0,"xanchor":"center","yanchor":"bottom"},
+                "가운데":{"x":0.5,"y":0.5,"xanchor":"center","yanchor":"middle"},
+            }
+            preview_fig.update_layout(legend=legend_coordinates.get(legend_position,legend_coordinates["자동 (겹침 최소화)"]))
+        preview_fig.update_layout(hoverlabel={"namelength":-1})
+        st.plotly_chart(preview_fig,use_container_width=True,key="graph_interactive_preview",
+                        config={"displaylogo":False,"scrollZoom":True})
+        st.caption("그래프 위에 마우스를 올리면 십자선과 축 좌표가 표시됩니다. 선 가까이에서는 가장 가까운 데이터의 X/Y 값도 확인할 수 있습니다.")
         st.caption(f"곡선 {len(series)}개 · 원본 데이터는 전체 해상도로 분석/내보내기합니다.")
 
 with tabs[1]:
