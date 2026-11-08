@@ -1202,7 +1202,7 @@ with tabs[0]:
             hoverdistance=100,
             spikedistance=-1,
             showlegend=legend,
-            legend={"font":{"size":legend_font_size},"x":1,"y":1,"xanchor":"right","yanchor":"top"},
+            legend={"font":{"family":font_family,"size":legend_font_size},"x":1,"y":1,"xanchor":"right","yanchor":"top"},
             width=canvas_width_px,
             height=canvas_height_px,
             margin={"l":int(plot_margins[0]),"r":int(plot_margins[1]),
@@ -1211,7 +1211,10 @@ with tabs[0]:
             paper_bgcolor="white")
         preview_fig.update_xaxes(
             range=[min(xmin,xmax),max(xmin,xmax)],
+            title_font={"family":font_family,"size":axis_label_size},
+            tickfont={"family":font_family,"size":tick_font_size},
             showgrid=grid,gridcolor="#d9d9d9",gridwidth=1,
+            zeroline=False,
             showline=True,linewidth=graph_frame_width,linecolor="black",
             mirror=show_graph_frame,side="top" if x_top and not x_bottom else "bottom",
             showticklabels=x_bottom or x_top,ticks="outside",
@@ -1227,7 +1230,10 @@ with tabs[0]:
         preview_y_min,preview_y_max=preview_y_range
         preview_fig.update_yaxes(
             range=[preview_y_min,preview_y_max],
+            title_font={"family":font_family,"size":axis_label_size},
+            tickfont={"family":font_family,"size":tick_font_size},
             showgrid=grid,gridcolor="#d9d9d9",gridwidth=1,
+            zeroline=False,
             showline=True,linewidth=graph_frame_width,linecolor="black",
             mirror=show_graph_frame,side="right" if y_right and not y_left else "left",
             showticklabels=y_left or y_right,ticks="outside",
@@ -1262,6 +1268,12 @@ with tabs[0]:
                 "가운데":{"x":0.5,"y":0.5,"xanchor":"center","yanchor":"middle"},
             }
             preview_fig.update_layout(legend=legend_coordinates.get(legend_position,legend_coordinates["자동 (겹침 최소화)"]))
+        scale_label=tick_scale_annotation(y_tick_options)
+        if scale_label:
+            preview_fig.add_annotation(
+                x=0,y=1.005,xref="paper",yref="paper",text=scale_label,
+                showarrow=False,xanchor="left",yanchor="bottom",
+                font={"family":font_family,"size":tick_font_size,"color":"#333333"})
         preview_fig.update_layout(hoverlabel={"namelength":-1})
         st.plotly_chart(preview_fig,use_container_width=False,key="graph_interactive_preview",
                         config={"displaylogo":False,"scrollZoom":True})
