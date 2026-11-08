@@ -1,10 +1,11 @@
 """Streamlit port of the RSLAB spectrum 👨🏻‍🔬👩🏻‍🔬 (core workflow)."""
 from __future__ import annotations
-import ast, io, json, csv, re, zipfile
+import ast, io, json, csv, re, zipfile, base64
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
@@ -1184,101 +1185,103 @@ with tabs[0]:
             heights.append(max(peak*1.10,0.01))
         auto={}
         for i,n in enumerate(names): auto[n]=sum(heights[i+1:]) if stack else 0
-        preview_fig=go.Figure()
+        # Draw the preview with the same Matplotlib renderer and settings as the PNG export.
+        # The HTML layer only adds pointer crosshairs over the rendered image, so font
+        # metrics, tick styling, labels, margins, and line placement remain unchanged.
+        apply_plot_font(font_family)
+        preview_mpl_fig,preview_ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
+        apply_graph_frame(preview_ax,show_graph_frame,graph_frame_width)
         for n in names:
-            if n not in selected: continue
-            s=next(z for z in series if z["name"]==n)
-            off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
-            preview_fig.add_trace(go.Scatter(
-                x=s["x"],y=proc[n]+off,name=n,mode="lines",
-                line={"color":style[n]["color"],"width":style[n]["linewidth"]},
-                hovertemplate="X: %{x:.6g}<br>Y: %{y:.6g}<extra>%{fullData.name}</extra>"))
-        preview_fig.update_layout(
-            title=title or None,
-            xaxis_title=format_axis_label(xlab),
-            yaxis_title=format_axis_label(ylab),
-            font={"family":font_family,"size":tick_font_size},
-            title_font={"family":font_family,"size":title_font_size,"color":axis_text_color},
-            hovermode="closest",
-            hoverdistance=100,
-            spikedistance=-1,
-            showlegend=legend,
-            legend={"font":{"family":font_family,"size":legend_font_size},"x":1,"y":1,"xanchor":"right","yanchor":"top"},
-            width=canvas_width_px,
-            height=canvas_height_px,
-            margin={"l":int(plot_margins[0]),"r":int(plot_margins[1]),
-                    "t":int(plot_margins[2]),"b":int(plot_margins[3])},
-            plot_bgcolor="white",
-            paper_bgcolor="white")
-        preview_fig.update_xaxes(
-            range=[min(xmin,xmax),max(xmin,xmax)],
-            title_font={"family":font_family,"size":axis_label_size,"color":axis_text_color},
-            tickfont={"family":font_family,"size":tick_font_size,"color":axis_text_color},
-            showgrid=grid,gridcolor="#d9d9d9",gridwidth=1,
-            zeroline=False,
-            showline=True,linewidth=graph_frame_width,linecolor="black",
-            mirror=show_graph_frame,side="top" if x_top and not x_bottom else "bottom",
-            showticklabels=x_bottom or x_top,ticks="outside",
-            dtick=x_tick_interval if x_tick_interval>0 else None,
-            showspikes=crosshair_enabled,spikemode="across",spikesnap="cursor",
-            spikecolor="#566573",spikethickness=1)
+            if n in selected:
+                s=next(z for z in series if z["name"]==n)
+                off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
+                preview_ax.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
+        preview_ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
         if y_auto:
-            preview_y_range=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
-            if preview_y_range is None:
-                preview_y_range=(proc_min,proc_max)
+            visible_limits=visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
+            if visible_limits:
+                preview_ax.set_ylim(*visible_limits)
         else:
-            preview_y_range=(min(ymin,ymax),max(ymin,ymax))
-        preview_y_min,preview_y_max=preview_y_range
-        preview_fig.update_yaxes(
-            range=[preview_y_min,preview_y_max],
-            title_font={"family":font_family,"size":axis_label_size,"color":axis_text_color},
-            tickfont={"family":font_family,"size":tick_font_size,"color":axis_text_color},
-            showgrid=grid,gridcolor="#d9d9d9",gridwidth=1,
-            zeroline=False,
-            showline=True,linewidth=graph_frame_width,linecolor="black",
-            mirror=show_graph_frame,side="right" if y_right and not y_left else "left",
-            showticklabels=y_left or y_right,ticks="outside",
-            dtick=y_tick_interval if y_tick_interval>0 else None,
-            showspikes=crosshair_enabled,spikemode="across",spikesnap="cursor",
-            spikecolor="#566573",spikethickness=1)
-        custom_y_tick_format=bool(
-            y_tick_options.get("formula","").strip() or
-            y_tick_options.get("unit","없음")!="없음" or
-            y_tick_options.get("decimal_enabled") or
-            y_tick_options.get("prefix") or y_tick_options.get("suffix") or
-            y_tick_options.get("plus_sign"))
-        if custom_y_tick_format:
-            tick_step=float(y_tick_interval) if y_tick_interval>0 else max((preview_y_max-preview_y_min)/5,1e-12)
-            tick_start=np.ceil(preview_y_min/tick_step)*tick_step
-            tick_values=np.arange(tick_start,preview_y_max+tick_step*.5,tick_step)
-            if len(tick_values)>100:
-                tick_values=tick_values[::int(np.ceil(len(tick_values)/100))]
-            preview_fig.update_yaxes(tickmode="array",tickvals=tick_values.tolist(),
-                                     ticktext=[y_tick_formatter(float(value),i) for i,value in enumerate(tick_values)])
+            preview_ax.set_ylim(min(ymin,ymax),max(ymin,ymax))
+        preview_ax.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color)
+        preview_ax.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
+        preview_ax.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
+        preview_ax.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,
+                               labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
+        preview_ax.tick_params(axis="y",which="both",left=y_left,right=y_right,
+                               labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
+        if x_tick_interval>0:
+            preview_ax.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
+        if y_tick_interval>0:
+            preview_ax.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
+        preview_ax.yaxis.set_major_formatter(y_tick_formatter)
+        add_y_scale_annotation(preview_ax,y_tick_options,tick_font_size,axis_text_color)
         if legend:
-            legend_coordinates={
-                "자동 (겹침 최소화)":{"x":1,"y":1,"xanchor":"right","yanchor":"top"},
-                "오른쪽 위":{"x":1,"y":1,"xanchor":"right","yanchor":"top"},
-                "왼쪽 위":{"x":0,"y":1,"xanchor":"left","yanchor":"top"},
-                "왼쪽 아래":{"x":0,"y":0,"xanchor":"left","yanchor":"bottom"},
-                "오른쪽 아래":{"x":1,"y":0,"xanchor":"right","yanchor":"bottom"},
-                "오른쪽 가운데":{"x":1,"y":0.5,"xanchor":"right","yanchor":"middle"},
-                "왼쪽 가운데":{"x":0,"y":0.5,"xanchor":"left","yanchor":"middle"},
-                "위 가운데":{"x":0.5,"y":1,"xanchor":"center","yanchor":"top"},
-                "아래 가운데":{"x":0.5,"y":0,"xanchor":"center","yanchor":"bottom"},
-                "가운데":{"x":0.5,"y":0.5,"xanchor":"center","yanchor":"middle"},
-            }
-            preview_fig.update_layout(legend=legend_coordinates.get(legend_position,legend_coordinates["자동 (겹침 최소화)"]))
-        scale_label=tick_scale_annotation(y_tick_options)
-        if scale_label:
-            preview_fig.add_annotation(
-                x=0,y=1.005,xref="paper",yref="paper",text=scale_label,
-                showarrow=False,xanchor="left",yanchor="bottom",
-                font={"family":font_family,"size":tick_font_size,"color":axis_text_color})
-        preview_fig.update_layout(hoverlabel={"namelength":-1})
-        st.plotly_chart(preview_fig,use_container_width=False,key="graph_interactive_preview",theme=None,
-                        config={"displaylogo":False,"scrollZoom":True})
-        st.caption("그래프 위에 마우스를 올리면 십자선과 축 좌표가 표시됩니다. 선 가까이에서는 가장 가까운 데이터의 X/Y 값도 확인할 수 있습니다.")
+            preview_ax.legend(fontsize=legend_font_size,loc=legend_loc)
+        if grid:
+            preview_ax.grid(True,alpha=.3)
+        preview_ax.figure.canvas.draw()
+        preview_x_limits=preview_ax.get_xlim()
+        preview_y_limits=preview_ax.get_ylim()
+        axes_bbox=preview_ax.get_window_extent()
+        figure_bbox=preview_mpl_fig.bbox
+        overlay_box={
+            "left":float(axes_bbox.x0/figure_bbox.width*canvas_width_px),
+            "top":float((figure_bbox.height-axes_bbox.y1)/figure_bbox.height*canvas_height_px),
+            "width":float(axes_bbox.width/figure_bbox.width*canvas_width_px),
+            "height":float(axes_bbox.height/figure_bbox.height*canvas_height_px),
+        }
+        preview_png=render_png_fixed_size(preview_mpl_fig,canvas_width_px,canvas_height_px,preview_dpi)
+        plt.close(preview_mpl_fig)
+        preview_image_b64=base64.b64encode(preview_png).decode("ascii")
+        crosshair_script="""
+        const stage=document.getElementById('stage');
+        const svg=document.getElementById('crosshair');
+        const vx=document.getElementById('vertical');
+        const hy=document.getElementById('horizontal');
+        const readout=document.getElementById('readout');
+        const plot={plot};
+        const width={width}, height={height};
+        const xlim={xlim}, ylim={ylim};
+        const enabled={enabled};
+        if(enabled){{
+          stage.addEventListener('pointermove',(event)=>{{
+            const rect=stage.getBoundingClientRect();
+            const x=(event.clientX-rect.left)*width/rect.width;
+            const y=(event.clientY-rect.top)*height/rect.height;
+            if(x<plot.left || x>plot.left+plot.width || y<plot.top || y>plot.top+plot.height){{
+              svg.style.display='none'; readout.style.display='none'; return;
+            }}
+            const valueX=xlim[0]+(x-plot.left)/plot.width*(xlim[1]-xlim[0]);
+            const valueY=ylim[1]-(y-plot.top)/plot.height*(ylim[1]-ylim[0]);
+            vx.setAttribute('x1',x); vx.setAttribute('x2',x);
+            vx.setAttribute('y1',plot.top); vx.setAttribute('y2',plot.top+plot.height);
+            hy.setAttribute('x1',plot.left); hy.setAttribute('x2',plot.left+plot.width);
+            hy.setAttribute('y1',y); hy.setAttribute('y2',y);
+            svg.style.display='block'; readout.textContent='X: '+Number(valueX.toPrecision(6))+'   Y: '+Number(valueY.toPrecision(6));
+            readout.style.display='block';
+          }});
+          stage.addEventListener('pointerleave',()=>{{svg.style.display='none';readout.style.display='none';}});
+        }}
+        """.format(plot=json.dumps(overlay_box),width=canvas_width_px,height=canvas_height_px,
+                   xlim=json.dumps([float(preview_x_limits[0]),float(preview_x_limits[1])]),
+                   ylim=json.dumps([float(preview_y_limits[0]),float(preview_y_limits[1])]),
+                   enabled="true" if crosshair_enabled else "false")
+        preview_html=f"""<!doctype html><html><head><meta charset="utf-8"><style>
+        html,body{{margin:0;padding:0;overflow:hidden;background:transparent}}
+        #stage{{position:relative;width:{canvas_width_px}px;height:{canvas_height_px}px;overflow:hidden}}
+        #graph{{display:block;width:{canvas_width_px}px;height:{canvas_height_px}px}}
+        #crosshair{{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none}}
+        #crosshair line{{stroke:#566573;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke}}
+        #readout{{display:none;position:absolute;right:7px;top:7px;padding:4px 7px;border:1px solid #aeb8c2;
+          border-radius:4px;background:rgba(255,255,255,.94);color:#263238;font:12px Arial,sans-serif;pointer-events:none}}
+        </style></head><body><div id="stage">
+        <img id="graph" src="data:image/png;base64,{preview_image_b64}" alt="그래프 미리보기">
+        <svg id="crosshair" viewBox="0 0 {canvas_width_px} {canvas_height_px}" preserveAspectRatio="none">
+          <line id="vertical"></line><line id="horizontal"></line></svg>
+        <div id="readout"></div></div><script>{crosshair_script}</script></body></html>"""
+        components.html(preview_html,width=canvas_width_px,height=canvas_height_px,scrolling=False)
+        st.caption("그래프 위에 마우스를 올리면 십자선과 해당 위치의 X/Y 좌표가 표시됩니다.")
         st.caption(f"캔버스 {canvas_width_px} × {canvas_height_px} px · 플롯 박스 {plot_box_width} × {plot_box_height} px · 곡선 {len(series)}개")
 
 with tabs[1]:
