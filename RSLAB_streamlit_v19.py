@@ -17,8 +17,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks, savgol_filter
 
-st.set_page_config(page_title="RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬", layout="wide")
-st.title("RSLAB Spectrum 👨🏻‍🔬👩🏻‍🔬")
+st.set_page_config(page_title="RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬", layout="wide")
+st.title("RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬")
 
 FONT_DIR=Path(__file__).resolve().parent/"fonts"
 BUNDLED_FONT_FAMILIES=set()
