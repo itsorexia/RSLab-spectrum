@@ -19,6 +19,7 @@ from scipy.signal import find_peaks, savgol_filter
 
 st.set_page_config(page_title="RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬", layout="wide")
 st.title("RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬")
+st.markdown("<div style='color:#b8b8b8; font-size:0.78rem; margin-top:-0.65rem; margin-bottom:0.6rem;'>created by YS Park</div>", unsafe_allow_html=True)
 
 FONT_DIR=Path(__file__).resolve().parent/"fonts"
 BUNDLED_FONT_FAMILIES=set()
