@@ -923,7 +923,7 @@ with st.sidebar:
             normalization_scope="전체 데이터"
             divisor=1.0
     with baseline_tab:
-        baseline_enabled=st.checkbox("Baseline 적용",value=False,key="baseline_enabled")
+        baseline_enabled=st.checkbox("Baseline 제거",value=False,key="baseline_enabled")
         if baseline_enabled:
             baseline_method=st.selectbox("Baseline 종류",["AsLS","Polynomial"],key="baseline_method")
             if baseline_method=="Polynomial":
