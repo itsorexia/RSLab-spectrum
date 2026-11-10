@@ -18,8 +18,7 @@ from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks, savgol_filter
 
 st.set_page_config(page_title="RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬", layout="wide")
-st.title("RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬")
-st.markdown("<div style='color:#b8b8b8; font-size:0.78rem; margin-top:-0.65rem; margin-bottom:0.6rem;'>created by YS Park</div>", unsafe_allow_html=True)
+st.markdown("<div style='display:flex; align-items:baseline; gap:14px; margin:0 0 0.6rem 0; flex-wrap:wrap;'><span style='font-size:2.5rem; line-height:1.25; font-weight:700; color:#262730;'>RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬</span><span style='font-size:0.78rem; color:#b8b8b8;'>created by YS Park</span></div>", unsafe_allow_html=True)
 
 FONT_DIR=Path(__file__).resolve().parent/"fonts"
 BUNDLED_FONT_FAMILIES=set()
