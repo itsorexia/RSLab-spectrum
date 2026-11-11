@@ -1,3 +1,4 @@
+
 """Streamlit port of the RSLAB spectrum 👨🏻‍🔬👩🏻‍🔬 (core workflow)."""
 from __future__ import annotations
 import ast, io, json, csv, re, zipfile, base64
@@ -751,6 +752,15 @@ def validate_curve_name(index):
         return
     series[index]["name"]=proposed
 
+def move_fit(index, direction):
+    """Move a fit result in the overlay draw and legend order."""
+    fits=st.session_state.get("fit_results",[])
+    target=index+direction
+    if not 0 <= index < len(fits) or not 0 <= target < len(fits):
+        return
+    fits[index],fits[target]=fits[target],fits[index]
+    st.session_state["fit_results"]=fits
+
 def move_curve(index, direction):
     """Move a curve and its keyed appearance settings together."""
     series=st.session_state.get("series",[])
@@ -1475,6 +1485,16 @@ with tabs[0]:
             plot_selected=signal_selected
             fit_results=st.session_state.get("fit_results",[])
             if fit_results:
+                with st.expander("피팅 곡선 순서 변경",expanded=False):
+                    st.caption("위·아래 버튼으로 피팅 곡선의 그리기 및 범례 순서를 바꿉니다. 뒤에 그려지는 곡선이 겹친 부분에서 위에 표시됩니다.")
+                    for fit_index,fit in enumerate(fit_results):
+                        fit_label=f"{fit['curve_name']} · {fit['model']} · {fit['purpose']}"
+                        order_col,up_col,down_col=st.columns([6,2,2],vertical_alignment="center")
+                        order_col.write(fit_label)
+                        up_col.button("위로",key=f"fit_up_{abs(hash(fit['id']))}",disabled=fit_index==0,
+                                       on_click=move_fit,args=(fit_index,-1),use_container_width=True)
+                        down_col.button("아래로",key=f"fit_down_{abs(hash(fit['id']))}",disabled=fit_index==len(fit_results)-1,
+                                         on_click=move_fit,args=(fit_index,1),use_container_width=True)
                 with st.expander("피팅 곡선 스타일",expanded=False):
                     st.caption("각 피팅 결과의 색상, 선 종류, 선 굵기를 따로 설정합니다. 미리보기와 PNG 저장 그래프에 함께 적용됩니다.")
                     line_styles={"실선":"-","파선":"--","점선":":","일점쇄선":"-."}
@@ -2163,3 +2183,6 @@ with tabs[5]:
     st.subheader("빈 스프레드시트")
     st.caption("새 데이터도 아래 표에 입력한 뒤 그래프에 추가할 수 있습니다.")
     render_blank_spectrum("blank_tab")
+
+
+
