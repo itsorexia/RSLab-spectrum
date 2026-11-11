@@ -710,9 +710,13 @@ def refresh_linked_errors(items):
     lookup={item["name"]:item for item in items}
     source_names={item.get("error_source") for item in items if item.get("error_source")}
     for target in items:
-        source=lookup.get(target.get("error_source"))
+        source_name=target.get("error_source")
+        # Preserve errors entered directly in the spreadsheet. Only refresh an
+        # error array when this target is explicitly linked to a separate curve.
+        if not source_name:
+            continue
+        source=lookup.get(source_name)
         if source is None:
-            target.pop("error",None)
             continue
         sx=np.asarray(source["x"],dtype=float)
         sy=np.abs(np.asarray(source["raw"],dtype=float))
