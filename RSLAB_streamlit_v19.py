@@ -1292,6 +1292,15 @@ with st.sidebar:
 style={}
 with tabs[0]:
     plot_col,settings_col=st.columns([2.2,1],gap="large")
+    st.markdown("""<style>
+    div[data-testid="column"]:has(#graph-preview-sticky) {
+        position: sticky;
+        top: 0.75rem;
+        align-self: flex-start;
+        height: max-content;
+        z-index: 3;
+    }
+    </style>""",unsafe_allow_html=True)
     with settings_col:
         st.subheader("그래프 설정")
         size_tab,axis_tab,stack_tab,visual_tab=st.tabs(["크기·글꼴","축 설정","수직 스택","비주얼"])
@@ -1662,6 +1671,7 @@ with tabs[0]:
         if y_log and not positive_y.size:
             st.error("Y축 로그 스케일에 사용할 양수 데이터가 없습니다.")
     with plot_col:
+        st.markdown('<div id="graph-preview-sticky"></div>',unsafe_allow_html=True)
         st.subheader("그래프 미리보기")
         crosshair_enabled=st.checkbox("X/Y 좌표 십자선 표시",value=True,key="graph_crosshair_enabled")
         proc={s["name"]:transform(s,opts) for s in series}
