@@ -16,6 +16,7 @@ from matplotlib.ticker import MultipleLocator, FuncFormatter
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks, savgol_filter
+from scipy.optimize import curve_fit
 
 st.set_page_config(page_title="RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬", layout="wide")
 st.markdown("<div style='display:flex; align-items:baseline; gap:14px; margin:0 0 0.6rem 0; flex-wrap:wrap;'><span style='font-size:2.5rem; line-height:1.25; font-weight:700; color:#262730;'>RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬</span><span style='font-size:0.78rem; color:#b8b8b8;'>created by YS Park</span></div>", unsafe_allow_html=True)
@@ -357,6 +358,148 @@ def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
                             capthick=error_capthick,elinewidth=error_linewidth,zorder=artist.get_zorder()-0.1)
         return artist
     return ax.plot(x,y,label=label,color=color,lw=linewidth)
+
+def fit_curve_model(x, y, purpose, model, sigma=None):
+    """Fit one predefined curve model and return predictions, parameters, and errors."""
+    x=np.asarray(x,dtype=float)
+    y=np.asarray(y,dtype=float)
+    sigma_array=np.asarray(sigma,dtype=float) if sigma is not None else None
+    fit_kwargs={"maxfev":50000}
+    if sigma_array is not None and np.all(np.isfinite(sigma_array)&(sigma_array>0)):
+        fit_kwargs.update({"sigma":sigma_array,"absolute_sigma":True})
+    else:
+        sigma_array=None
+
+    if model in ("Linear","Quadratic","Cubic"):
+        degree={"Linear":1,"Quadratic":2,"Cubic":3}[model]
+        weights=(1/sigma_array) if sigma_array is not None else None
+        coeffs,covariance=np.polyfit(x,y,degree,w=weights,cov=True)
+        fitted=np.polyval(coeffs,x)
+        params=[(f"a{degree-i}",float(value)) for i,value in enumerate(coeffs)]
+        errors=np.sqrt(np.maximum(0,np.diag(covariance)))
+        return np.polyval,coeffs,params,fitted,errors
+
+    if model in ("Gaussian","Lorentzian","Pseudo-Voigt"):
+        span=max(float(np.ptp(x)),np.finfo(float).eps)
+        baseline0=float(np.percentile(y,10))
+        peak_i=int(np.nanargmax(y))
+        amplitude0=max(float(y[peak_i]-baseline0),np.finfo(float).eps)
+        center0=float(x[peak_i])
+        width0=max(span/10,np.finfo(float).eps*100)
+        center_bounds=(float(np.min(x)),float(np.max(x)))
+        if model=="Gaussian":
+            names=["baseline","amplitude","center","sigma"]
+            def fn(xx,b,a,c,w): return b+a*np.exp(-0.5*((xx-c)/w)**2)
+            p0=[baseline0,amplitude0,center0,width0]
+            lower=[-np.inf,-np.inf,center_bounds[0],np.finfo(float).eps]
+            upper=[np.inf,np.inf,center_bounds[1],span*10]
+        elif model=="Lorentzian":
+            names=["baseline","amplitude","center","gamma"]
+            def fn(xx,b,a,c,w): return b+a*(w*w)/((xx-c)**2+w*w)
+            p0=[baseline0,amplitude0,center0,width0]
+            lower=[-np.inf,-np.inf,center_bounds[0],np.finfo(float).eps]
+            upper=[np.inf,np.inf,center_bounds[1],span*10]
+        else:
+            names=["baseline","amplitude","center","width","eta"]
+            def fn(xx,b,a,c,w,eta):
+                u=(xx-c)/w
+                return b+a*(eta/(1+u*u)+(1-eta)*np.exp(-4*np.log(2)*u*u))
+            p0=[baseline0,amplitude0,center0,width0,0.5]
+            lower=[-np.inf,-np.inf,center_bounds[0],np.finfo(float).eps,0.0]
+            upper=[np.inf,np.inf,center_bounds[1],span*10,1.0]
+        popt,pcov=curve_fit(fn,x,y,p0=p0,bounds=(lower,upper),**fit_kwargs)
+        fitted=fn(x,*popt)
+        parameter_rows=[(name,float(value)) for name,value in zip(names,popt)]
+        parameter_errors=np.sqrt(np.maximum(0,np.diag(pcov))) if np.all(np.isfinite(pcov)) else np.full(len(popt),np.nan)
+        return fn,popt,parameter_rows,fitted,parameter_errors
+
+    if model=="Exponential":
+        center=float(np.mean(x))
+        scale=max(float(np.ptp(x))/2,np.finfo(float).eps)
+        z=(x-center)/scale
+        baseline0=float(y[np.argmin(y)])
+        amplitude0=float(np.max(y)-np.min(y))
+        slope0=float(np.polyfit(z,y,1)[0])
+        rate0=float(np.clip(slope0/max(abs(amplitude0),1e-12),-2,2))
+        def fn(zv,a,k,c): return c+a*np.exp(np.clip(k*zv,-700,700))
+        p0=[amplitude0,rate0,baseline0]
+        popt,pcov=curve_fit(fn,z,y,p0=p0,bounds=([-np.inf,-50,-np.inf],[np.inf,50,np.inf]),**fit_kwargs)
+        fitted=fn(z,*popt)
+        rows=[("amplitude",float(popt[0])),("rate per half-range",float(popt[1])),("offset",float(popt[2]))]
+        errors=np.sqrt(np.maximum(0,np.diag(pcov))) if np.all(np.isfinite(pcov)) else np.full(len(popt),np.nan)
+        evaluator=lambda xx: fn((np.asarray(xx,dtype=float)-center)/scale,*popt)
+        return evaluator,popt,rows,fitted,errors
+
+    if model=="4PL":
+        if np.any(x<0) or not np.any(x>0):
+            raise ValueError("4PL 피팅에는 0 이상의 X값과 적어도 하나의 양수 X값이 필요합니다.")
+        y_at_low_x=float(y[np.argmin(x)])
+        y_at_high_x=float(y[np.argmax(x)])
+        correlation=float(np.corrcoef(x,y)[0,1])
+        direction=1.0 if not np.isfinite(correlation) or correlation>=0 else -1.0
+        bottom0,top0=((y_at_low_x,y_at_high_x) if direction>0 else (y_at_high_x,y_at_low_x))
+        positive_x=x[x>0]
+        ec50_0=float(np.median(positive_x))
+        def fn(xx,bottom,top,ec50,hill):
+            xx=np.asarray(xx,dtype=float)
+            exponent=np.empty_like(xx)
+            positive=xx>0
+            exponent[positive]=hill*(np.log(ec50)-np.log(xx[positive]))
+            exponent[~positive]=700 if hill>=0 else -700
+            exponent=np.clip(exponent,-700,700)
+            return bottom+(top-bottom)/(1+np.exp(exponent))
+        p0=[bottom0,top0,ec50_0,direction]
+        lower=[-np.inf,-np.inf,max(float(np.min(positive_x))*1e-4,np.finfo(float).tiny),-20]
+        upper=[np.inf,np.inf,float(np.max(positive_x))*1e4,20]
+        popt,pcov=curve_fit(fn,x,y,p0=p0,bounds=(lower,upper),**fit_kwargs)
+        fitted=fn(x,*popt)
+        names=["bottom","top","EC50","Hill slope"]
+        rows=[(name,float(value)) for name,value in zip(names,popt)]
+        errors=np.sqrt(np.maximum(0,np.diag(pcov))) if np.all(np.isfinite(pcov)) else np.full(len(popt),np.nan)
+        return fn,popt,rows,fitted,errors
+
+    raise ValueError(f"지원하지 않는 피팅 모델입니다: {model}")
+
+def extend_ylim_for_fit(limits, fits, visible_ids, plotted_names, plot_names, auto_offsets,
+                        offset_step, style, x_min, x_max, log_scale=False):
+    """Expand automatic graph limits to include visible fit curves."""
+    if limits is None:
+        return None
+    values=[]
+    x_min,x_max=sorted((float(x_min),float(x_max)))
+    for fit in fits:
+        name=fit.get("curve_name")
+        if fit.get("id") not in visible_ids or name not in plotted_names:
+            continue
+        xx=np.asarray(fit["x_fit"],dtype=float)
+        yy=np.asarray(fit["y_fit"],dtype=float)
+        offset=auto_offsets[name]+offset_step*plot_names.index(name)+style[name]["offset"]
+        mask=np.isfinite(xx)&np.isfinite(yy)&(xx>=x_min)&(xx<=x_max)
+        if log_scale: mask &= (yy+offset)>0
+        if np.any(mask): values.extend((yy[mask]+offset).tolist())
+    if not values:
+        return limits
+    low=min(float(limits[0]),float(np.min(values)))
+    high=max(float(limits[1]),float(np.max(values)))
+    if log_scale:
+        if low<=0: low=min(v for v in values if v>0)
+        if high<=low: return limits
+        ratio=(high/low)**0.05
+        return low/ratio,high*ratio
+    span=high-low
+    padding=0.05*span if span>0 else max(abs(high)*0.05,0.01)
+    return low-padding,high+padding
+
+def draw_fit_overlays(ax, fits, visible_ids, plotted_names, plot_names, auto_offsets,
+                      offset_step, style):
+    for fit in fits:
+        name=fit.get("curve_name")
+        if fit.get("id") not in visible_ids or name not in plotted_names:
+            continue
+        offset=auto_offsets[name]+offset_step*plot_names.index(name)+style[name]["offset"]
+        ax.plot(fit["x_fit"],np.asarray(fit["y_fit"],dtype=float)+offset,
+                linestyle="--",linewidth=2,color=style[name]["color"],
+                label=f"Fit · {name} · {fit['model']}")
 
 def compute_average_curve(target_names, series, values_by_name, axis_label):
     """Average selected curves on the first selected curve's grid over their shared X range."""
@@ -806,6 +949,7 @@ def curve_archive(target_names, series, values_by_name, extension, errors_by_nam
 
 if "series" not in st.session_state: st.session_state.series=[]
 st.session_state.series=make_series_names_unique(st.session_state.series)
+st.session_state.setdefault("fit_results",[])
 
 def render_blank_spectrum(prefix):
     """Provide a spreadsheet-like grid for direct cell editing and multi-cell paste."""
@@ -885,6 +1029,8 @@ with st.sidebar:
     if st.button("전체 지우기",use_container_width=True):
         st.session_state.series=[]
         st.session_state["graph_selected"]=[]
+        st.session_state["fit_results"]=[]
+        st.session_state["graph_visible_fit_ids"]=[]
     if st.session_state.series:
         st.download_button("현재 세션 저장 (.json)",state_json(st.session_state.series),"rslab_session.json","application/json",use_container_width=True)
         session=st.file_uploader("세션 불러오기 (.json)",type="json",key="session_upload")
@@ -894,6 +1040,8 @@ with st.sidebar:
                        **({"error":np.asarray(s["error"],dtype=float)} if s.get("error") is not None else {})}
                       for s in raw]
             st.session_state.series=make_series_names_unique(restored)
+            st.session_state["fit_results"]=[]
+            st.session_state["graph_visible_fit_ids"]=[]
             st.session_state["graph_selected"]=[s["name"] for s in st.session_state.series]
             st.rerun()
     if st.session_state.series:
@@ -1071,7 +1219,7 @@ with st.sidebar:
                            format_func=selection_label,label_visibility="collapsed")
         selected_for_plot.extend(st.session_state[group_key])
     st.session_state["graph_selected"]=list(dict.fromkeys(selected_for_plot))
-tabs=st.tabs(["그래프 및 처리","곡선 평균","피크 분석","내보내기","데이터 시트"])
+tabs=st.tabs(["그래프 및 처리","곡선 평균","피크 분석","피팅","내보내기","데이터 시트"])
 with st.sidebar:
     st.header("처리")
     normalization_tab,baseline_tab,smoothing_tab=st.tabs(["Normalization","Baseline","SG 필터"])
@@ -1165,6 +1313,29 @@ with tabs[0]:
                     error_capsize=cap_col.number_input("에러바 머리 길이 (pt)",min_value=0.0,max_value=15.0,value=3.0,step=0.5,key="graph_error_capsize")
                     error_linewidth=thickness_col.number_input("에러바 두께 (머리+선)",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_thickness")
                     error_capthick=error_linewidth
+            fit_results=st.session_state.get("fit_results",[])
+            fit_ids=[fit["id"] for fit in fit_results]
+            pending_fit_id=st.session_state.pop("_pending_fit_overlay_id",None)
+            if pending_fit_id in fit_ids:
+                st.session_state["graph_show_fit_overlay"]=True
+                current_before=st.session_state.get("graph_visible_fit_ids",[])
+                st.session_state["graph_visible_fit_ids"]=list(dict.fromkeys([*current_before,pending_fit_id]))
+            if fit_ids:
+                valid_fit_ids=set(fit_ids)
+                current_fit_ids=st.session_state.get("graph_visible_fit_ids")
+                if current_fit_ids is None:
+                    st.session_state["graph_visible_fit_ids"]=fit_ids.copy()
+                else:
+                    st.session_state["graph_visible_fit_ids"]=[fit_id for fit_id in current_fit_ids if fit_id in valid_fit_ids]
+                show_fit_overlay=st.checkbox("피팅 곡선 그래프에 표시",value=True,key="graph_show_fit_overlay")
+                fit_labels={fit["id"]:f"{fit['curve_name']} · {fit['model']} · {fit['purpose']}" for fit in fit_results}
+                visible_fit_ids=(st.multiselect("표시할 피팅 결과",fit_ids,
+                                                format_func=lambda fit_id:fit_labels.get(fit_id,fit_id),
+                                                key="graph_visible_fit_ids") if show_fit_overlay else [])
+            else:
+                show_fit_overlay=False
+                visible_fit_ids=[]
+                st.caption("피팅 탭에서 결과를 계산하면 이 그래프에 겹쳐 표시할 수 있습니다.")
             palette_upload=st.file_uploader("색상 팔레트 업로드 (이미지 / TXT / CSV)",
                                              type=["png","jpg","jpeg","webp","txt","csv"],
                                              key="graph_palette_upload",
@@ -1289,6 +1460,9 @@ with tabs[0]:
             for item in series:
                 if item.get("error_source") in renamed:
                     item["error_source"]=renamed[item["error_source"]]
+            for fit in st.session_state.get("fit_results",[]):
+                if fit.get("curve_name") in renamed:
+                    fit["curve_name"]=renamed[fit["curve_name"]]
             selected=[renamed.get(name,name) for name in selected]
             st.session_state["graph_name_aliases"]=renamed
             if "graph_average_targets" in st.session_state:
@@ -1296,6 +1470,8 @@ with tabs[0]:
             names=[s["name"] for s in series]
             signal_selected=[n for n in selected if n not in error_source_names]
             plot_selected=signal_selected
+            overlay_fit_results=[fit for fit in st.session_state.get("fit_results",[])
+                                 if fit.get("id") in visible_fit_ids and fit.get("curve_name") in plot_selected]
 
         with size_tab:
             size_mode="전체 이미지 기준"
@@ -1479,12 +1655,17 @@ with tabs[0]:
                 order=np.argsort(curve_x[valid_indices])
                 hover_curves.append({"name":n,"x":curve_x[valid_indices][order].tolist(),
                                      "y":curve_y[valid_indices][order].tolist()})
+        if show_fit_overlay:
+            draw_fit_overlays(preview_ax,overlay_fit_results,visible_fit_ids,plot_selected,plot_names,auto,offset_step,style)
         if x_log: preview_ax.set_xscale("log")
         if y_log: preview_ax.set_yscale("log")
         preview_ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
         if y_auto:
             visible_limits=(visible_stack_log_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax)
                             if y_log else visible_stack_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax))
+            visible_limits=extend_ylim_for_fit(visible_limits,overlay_fit_results,visible_fit_ids,
+                                               plot_selected,plot_names,auto,offset_step,style,
+                                               xmin,xmax,y_log)
             if visible_limits:
                 preview_ax.set_ylim(*visible_limits)
         else:
@@ -1779,6 +1960,87 @@ with tabs[2]:
                 st.info("입력한 X 범위 안에 유효한 데이터가 없습니다.")
 
 with tabs[3]:
+    st.subheader("곡선 피팅")
+    st.caption("현재 처리 설정(SG 필터·baseline·normalization)이 적용된 Y 데이터를 피팅합니다. 설정을 바꾼 뒤에는 다시 피팅해 주세요. 입력 오차가 모두 유효하면 가중 피팅을 적용합니다. baseline·SG 필터에 따른 오차 전파는 계산하지 않습니다.")
+    fit_purpose=st.selectbox("피팅 목적",["스펙트럼 피크","검량선"],key="fit_purpose")
+    fit_models={"스펙트럼 피크":["Gaussian","Lorentzian","Pseudo-Voigt"],
+                "검량선":["Linear","Quadratic","Cubic","Exponential","4PL"]}
+    if st.session_state.get("fit_model_name") not in fit_models[fit_purpose]:
+        st.session_state["fit_model_name"]=fit_models[fit_purpose][0]
+    fit_model_name=st.selectbox("피팅 모델",fit_models[fit_purpose],key="fit_model_name")
+    fit_target=st.selectbox("피팅할 곡선",plot_names,key="fit_target_curve")
+    fit_series=next(item for item in series if item["name"]==fit_target)
+    fit_x_all=np.asarray(fit_series["x"],dtype=float)
+    fit_y_all=np.asarray(proc[fit_target],dtype=float)
+    fit_x_finite=fit_x_all[np.isfinite(fit_x_all)]
+    fit_x_data_min=float(np.min(fit_x_finite)); fit_x_data_max=float(np.max(fit_x_finite))
+    if st.session_state.get("fit_range_curve")!=fit_target:
+        st.session_state["fit_x_min"]=fit_x_data_min
+        st.session_state["fit_x_max"]=fit_x_data_max
+        st.session_state["fit_range_curve"]=fit_target
+    fit_range_col1,fit_range_col2=st.columns(2)
+    fit_x_min=fit_range_col1.number_input("피팅 X 최소",value=fit_x_data_min,format="%.8g",key="fit_x_min")
+    fit_x_max=fit_range_col2.number_input("피팅 X 최대",value=fit_x_data_max,format="%.8g",key="fit_x_max")
+    if st.button("피팅 실행",type="primary",key="run_curve_fit"):
+        fit_mask=(np.isfinite(fit_x_all)&np.isfinite(fit_y_all)&
+                  (fit_x_all>=min(fit_x_min,fit_x_max))&(fit_x_all<=max(fit_x_min,fit_x_max)))
+        x_fit_data=fit_x_all[fit_mask]
+        y_fit_data=fit_y_all[fit_mask]
+        minimum_points={"Linear":3,"Quadratic":4,"Cubic":5,"Exponential":5,
+                        "4PL":5,"Gaussian":5,"Lorentzian":5,"Pseudo-Voigt":6}[fit_model_name]
+        if len(x_fit_data)<minimum_points:
+            st.error(f"{fit_model_name} 피팅에는 현재 범위에 유효한 데이터가 {minimum_points}점 이상 필요합니다.")
+        elif fit_x_min>=fit_x_max:
+            st.error("피팅 X 최소값은 최대값보다 작아야 합니다.")
+        else:
+            sigma_all=processed_error(fit_series,opts)
+            sigma_fit=sigma_all[fit_mask] if sigma_all is not None else None
+            use_weights=(sigma_fit is not None and np.all(np.isfinite(sigma_fit)&(sigma_fit>0)))
+            try:
+                evaluator,fit_params,param_rows,fitted_values,param_errors=fit_curve_model(
+                    x_fit_data,y_fit_data,fit_purpose,fit_model_name,sigma_fit if use_weights else None)
+                dense_x=np.linspace(float(np.min(x_fit_data)),float(np.max(x_fit_data)),400)
+                if fit_model_name in ("Linear","Quadratic","Cubic"):
+                    dense_y=evaluator(dense_x,fit_params)
+                else:
+                    dense_y=evaluator(dense_x,*fit_params)
+                residuals=y_fit_data-fitted_values
+                ss_res=float(np.sum(residuals**2))
+                ss_tot=float(np.sum((y_fit_data-np.mean(y_fit_data))**2))
+                r_squared=1-ss_res/ss_tot if ss_tot>0 else np.nan
+                rmse=float(np.sqrt(np.mean(residuals**2)))
+                fit_id=f"{fit_target}|{fit_purpose}|{fit_model_name}|{min(fit_x_min,fit_x_max):.10g}|{max(fit_x_min,fit_x_max):.10g}"
+                parameter_records=[]
+                for i,(param_name,param_value) in enumerate(param_rows):
+                    standard_error=(float(param_errors[i]) if param_errors is not None and i<len(param_errors) else np.nan)
+                    parameter_records.append({"Parameter":param_name,"Estimate":param_value,"Std. error":standard_error})
+                new_fit={"id":fit_id,"curve_name":fit_target,"purpose":fit_purpose,"model":fit_model_name,
+                         "x_fit":dense_x,"y_fit":np.asarray(dense_y,dtype=float),
+                         "parameters":parameter_records,"r_squared":r_squared,"rmse":rmse,
+                         "n_points":int(len(x_fit_data)),"weighted":bool(use_weights),
+                         "x_min":float(min(fit_x_min,fit_x_max)),"x_max":float(max(fit_x_min,fit_x_max))}
+                current=[fit for fit in st.session_state.get("fit_results",[]) if fit.get("id")!=fit_id]
+                st.session_state["fit_results"]=[*current,new_fit]
+                st.session_state["_pending_fit_overlay_id"]=fit_id
+                st.rerun()
+            except (RuntimeError,ValueError,OverflowError,FloatingPointError) as exc:
+                st.error(f"피팅에 실패했습니다: {exc}")
+    fit_results=st.session_state.get("fit_results",[])
+    if fit_results:
+        st.markdown("**저장된 피팅 결과**")
+        for fit in reversed(fit_results):
+            with st.expander(f"{fit['curve_name']} · {fit['model']} · {fit['purpose']} ({fit['x_min']:g}–{fit['x_max']:g})",expanded=False):
+                metric1,metric2,metric3=st.columns(3)
+                metric1.metric("R²",f"{fit['r_squared']:.6g}")
+                metric2.metric("RMSE",f"{fit['rmse']:.6g}")
+                metric3.metric("포인트 수",fit["n_points"])
+                st.dataframe(pd.DataFrame(fit["parameters"]),use_container_width=True,hide_index=True)
+                st.caption("오차값 가중" if fit.get("weighted") else "비가중 피팅")
+                if st.button("이 피팅 결과 삭제",key=f"delete_fit_{fit['id']}"):
+                    st.session_state["fit_results"]=[item for item in fit_results if item["id"]!=fit["id"]]
+                    st.rerun()
+
+with tabs[4]:
     st.subheader("그래프 저장")
     apply_plot_font(font_family)
     figout,axout=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
@@ -1790,12 +2052,17 @@ with tabs[3]:
             error_values=processed_error(s,opts)
             draw_curve(axout,s,proc[n]+off,n,style[n]["color"],style[n]["linewidth"],
                        plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
+    if show_fit_overlay:
+        draw_fit_overlays(axout,overlay_fit_results,visible_fit_ids,plot_selected,plot_names,auto,offset_step,style)
     if x_log: axout.set_xscale("log")
     if y_log: axout.set_yscale("log")
     axout.set_xlim(min(xmin,xmax),max(xmin,xmax))
     if y_auto:
         visible_limits=(visible_stack_log_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax)
                        if y_log else visible_stack_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax))
+        visible_limits=extend_ylim_for_fit(visible_limits,overlay_fit_results,visible_fit_ids,
+                                           plot_selected,plot_names,auto,offset_step,style,
+                                           xmin,xmax,y_log)
         if visible_limits:
             ylo,yhi=visible_limits
             axout.set_ylim(ylo,yhi)
@@ -1850,7 +2117,7 @@ with tabs[3]:
     c2.download_button("곡선별 보정 TXT ZIP",curve_archive(exported_curve_names,series,corrected_values,"txt",corrected_errors),
                        "spectra_corrected_txt.zip","application/zip",disabled=not names,use_container_width=True)
 
-with tabs[4]:
+with tabs[5]:
     st.subheader("불러온 데이터 편집")
     st.caption("곡선을 선택하고 편집 창을 열면 X/Y 값을 스프레드시트처럼 수정할 수 있습니다. 수정한 값은 그래프와 내보내기에 반영됩니다.")
     edit_names=[s["name"] for s in st.session_state.series]
