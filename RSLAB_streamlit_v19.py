@@ -342,23 +342,20 @@ def processed_error(s, opts):
 
 def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
                scatter_marker=("o",True), error_capsize=3.0, error_capthick=1.0, error_linewidth=1.0):
-    """Draw one series using the selected global plot style."""
+    """Draw one series; scatter plots include supplied uncertainties as error bars."""
     x=np.asarray(s["x"],dtype=float)
     y=np.asarray(y,dtype=float)
     if plot_style=="산점도":
         marker,filled=scatter_marker
         facecolor=color if filled else "none"
-        return ax.scatter(x,y,label=label,marker=marker,s=34,
+        artist=ax.scatter(x,y,label=label,marker=marker,s=34,
                           facecolors=facecolor,edgecolors=color,linewidths=max(0.7,linewidth))
-    if plot_style=="에러바":
-        if error is None:
-            return None
-        err=np.asarray(error,dtype=float)
-        if len(err)!=len(y) or not np.isfinite(err).any():
-            return None
-        return ax.errorbar(x,y,yerr=err,fmt="o",linestyle="none",label=label,
-                           color=color,markersize=3.5,capsize=error_capsize,
-                           capthick=error_capthick,elinewidth=error_linewidth)
+        if error is not None:
+            err=np.asarray(error,dtype=float)
+            if len(err)==len(y) and np.isfinite(err).any():
+                ax.errorbar(x,y,yerr=err,fmt="none",ecolor=color,capsize=error_capsize,
+                            capthick=error_capthick,elinewidth=error_linewidth,zorder=artist.get_zorder()-0.1)
+        return artist
     return ax.plot(x,y,label=label,color=color,lw=linewidth)
 
 def compute_average_curve(target_names, series, values_by_name, axis_label):
@@ -1143,7 +1140,9 @@ with tabs[0]:
                 for i,s in enumerate(series):
                     s["offset"]=st.number_input(f"{s['name']} 오프셋",value=float(s.get("offset",0)),key=f"off_{i}")
         with visual_tab:
-            plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도","에러바"],key="graph_plot_style")
+            if st.session_state.get("graph_plot_style")=="에러바":
+                st.session_state["graph_plot_style"]="산점도"
+            plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도"],key="graph_plot_style")
             scatter_marker=("o",True)
             error_capsize,error_capthick,error_linewidth=3.0,1.0,1.0
             if plot_style=="산점도":
@@ -1153,12 +1152,15 @@ with tabs[0]:
                                 "꽉 찬 마름모":("D",True),"안 찬 마름모":("D",False)}
                 marker_label=st.selectbox("점 모양",list(marker_options),key="graph_scatter_marker")
                 scatter_marker=marker_options[marker_label]
-            if plot_style=="에러바":
-                st.caption("스프레드시트의 오차 열 또는 불러온 오차 곡선을 연결한 데이터만 표시됩니다. 정규화 배율은 오차에도 반영되며, baseline·SG 필터의 오차 전파는 계산하지 않습니다.")
-                cap_col,thickness_col=st.columns(2)
-                error_capsize=cap_col.number_input("에러바 머리 길이 (pt)",min_value=0.0,max_value=15.0,value=3.0,step=0.5,key="graph_error_capsize")
-                error_linewidth=thickness_col.number_input("에러바 두께 (머리+선)",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_thickness")
-                error_capthick=error_linewidth
+                has_error_data=any(s["name"] in selected and s.get("error") is not None and
+                                   np.isfinite(np.asarray(s["error"],dtype=float)).any() for s in series)
+                st.caption("연결된 오차 데이터가 있으면 산점도 점에 에러바가 함께 표시됩니다.")
+                if has_error_data:
+                    st.caption("정규화 배율은 오차에도 반영됩니다. baseline·SG 필터의 오차 전파는 계산하지 않습니다.")
+                    cap_col,thickness_col=st.columns(2)
+                    error_capsize=cap_col.number_input("에러바 머리 길이 (pt)",min_value=0.0,max_value=15.0,value=3.0,step=0.5,key="graph_error_capsize")
+                    error_linewidth=thickness_col.number_input("에러바 두께 (머리+선)",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_thickness")
+                    error_capthick=error_linewidth
             palette_upload=st.file_uploader("색상 팔레트 업로드 (이미지 / TXT / CSV)",
                                              type=["png","jpg","jpeg","webp","txt","csv"],
                                              key="graph_palette_upload",
@@ -1288,15 +1290,8 @@ with tabs[0]:
             if "graph_average_targets" in st.session_state:
                 st.session_state["graph_average_targets"]=[renamed.get(name,name) for name in st.session_state["graph_average_targets"]]
             names=[s["name"] for s in series]
-            selected_errors={s["name"]:s.get("error") for s in series}
             signal_selected=[n for n in selected if n not in error_source_names]
-            plot_selected=([n for n in signal_selected if selected_errors.get(n) is not None and
-                            np.isfinite(np.asarray(selected_errors[n],dtype=float)).any()]
-                           if plot_style=="에러바" else signal_selected)
-            if plot_style=="에러바" and not plot_selected:
-                st.warning("에러바 스타일을 선택했지만, 선택된 곡선에 연결된 오차 데이터가 없습니다. 스프레드시트에서 오차 열을 연결해 주세요.")
-            elif plot_style=="에러바" and len(plot_selected)<len(signal_selected):
-                st.caption("오차 열이 지정되지 않은 곡선은 에러바 그래프에서 제외됩니다.")
+            plot_selected=signal_selected
 
         with size_tab:
             size_mode="전체 이미지 기준"
@@ -1471,8 +1466,6 @@ with tabs[0]:
                 curve_x=np.asarray(s["x"],dtype=float)
                 curve_y=np.asarray(proc[n],dtype=float)+off
                 error_values=processed_error(s,opts)
-                if plot_style=="에러바" and error_values is None:
-                    continue
                 draw_curve(preview_ax,s,curve_y,n,style[n]["color"],style[n]["linewidth"],
                            plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
                 valid=np.isfinite(curve_x)&np.isfinite(curve_y)
@@ -1661,8 +1654,6 @@ with tabs[2]:
                 peak_s=next(z for z in series if z["name"]==n)
                 peak_offset=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
                 error_values=processed_error(peak_s,opts)
-                if plot_style=="에러바" and error_values is None:
-                    continue
                 draw_curve(ax2,peak_s,proc[n]+peak_offset,n,style[n]["color"],style[n]["linewidth"],
                            plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
             ax2.scatter(s["x"][peaks],y[peaks]+peak_target_offset,color="red",zorder=5)
@@ -1793,10 +1784,8 @@ with tabs[3]:
             s=next(z for z in series if z["name"]==n)
             off=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
             error_values=processed_error(s,opts)
-            if plot_style=="에러바" and error_values is None:
-                continue
             draw_curve(axout,s,proc[n]+off,n,style[n]["color"],style[n]["linewidth"],
-                       plot_style,error_values)
+                       plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
     if x_log: axout.set_xscale("log")
     if y_log: axout.set_yscale("log")
     axout.set_xlim(min(xmin,xmax),max(xmin,xmax))
