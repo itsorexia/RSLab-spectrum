@@ -140,6 +140,80 @@ def parse_upload(upload):
     # Wide mapping exports store one spectrum per row: a spectral-axis header,
     # followed by a time coordinate or X/Y coordinates and then intensity values.
     first_idx=next((i for i,line in enumerate(lines) if line.strip()),None)
+    # Re-import the paired X/Y table used when selected curves have different X grids.
+    # Each curve has its own "name | X [axis label]" and "name | Y" columns;
+    # an optional "name | Error" column is attached to that curve on import.
+    if first_idx is not None:
+        header_line=lines[first_idx]
+        paired_sep="\t" if "\t" in header_line else ","
+        try:
+            header_cells=next(csv.reader([header_line],delimiter=paired_sep))
+            common_x_match=re.match(r"^\s*X(?:\s*\[(.*?)\])?\s*$",str(header_cells[0]),re.IGNORECASE)
+            if common_x_match:
+                common_df=pd.read_csv(io.StringIO(text),sep=paired_sep,comment="#",on_bad_lines="skip")
+                x_values=pd.to_numeric(common_df.iloc[:,0],errors="coerce")
+                axis_label=(common_x_match.group(1) or "X").strip()
+                common_errors={}
+                for column_index,cell in enumerate(header_cells[1:],1):
+                    match=re.match(r"^(.+?)\s*\|\s*Error$",str(cell).strip(),re.IGNORECASE)
+                    if match:
+                        common_errors[match.group(1).strip()]=column_index
+                common_series=[]
+                for column_index,cell in enumerate(header_cells[1:],1):
+                    curve_name=str(cell).strip()
+                    if curve_name in common_errors or re.search(r"\s\|\sError$",curve_name,re.IGNORECASE):
+                        continue
+                    y_values=pd.to_numeric(common_df.iloc[:,column_index],errors="coerce")
+                    valid=x_values.notna() & y_values.notna()
+                    if valid.sum()<2:
+                        continue
+                    item={"name":curve_name,"x":x_values[valid].to_numpy(float),"raw":y_values[valid].to_numpy(float),
+                          "x_label":axis_label,"y_label":"Intensity"}
+                    if curve_name in common_errors:
+                        error_values=pd.to_numeric(common_df.iloc[:,common_errors[curve_name]],errors="coerce")
+                        item["error"]=np.abs(error_values[valid].to_numpy(float))
+                    common_series.append(item)
+                if common_series:
+                    return common_series
+            x_pattern=re.compile(r"^(.+?)\s*\|\s*X(?:\s*\[(.*?)\])?$",re.IGNORECASE)
+            y_pattern=re.compile(r"^(.+?)\s*\|\s*Y$",re.IGNORECASE)
+            error_pattern=re.compile(r"^(.+?)\s*\|\s*Error$",re.IGNORECASE)
+            paired_x={}; paired_y={}; paired_error={}; paired_axis_labels={}
+            for column_index,cell in enumerate(header_cells):
+                header=str(cell).strip()
+                match=x_pattern.match(header)
+                if match:
+                    curve_name=match.group(1).strip()
+                    paired_x[curve_name]=column_index
+                    paired_axis_labels[curve_name]=(match.group(2) or "X").strip()
+                    continue
+                match=y_pattern.match(header)
+                if match:
+                    paired_y[match.group(1).strip()]=column_index
+                    continue
+                match=error_pattern.match(header)
+                if match:
+                    paired_error[match.group(1).strip()]=column_index
+            paired_names=[name for name in paired_x if name in paired_y]
+            if paired_names:
+                paired_df=pd.read_csv(io.StringIO(text),sep=paired_sep,comment="#",on_bad_lines="skip")
+                paired_series=[]
+                for curve_name in paired_names:
+                    x=pd.to_numeric(paired_df.iloc[:,paired_x[curve_name]],errors="coerce")
+                    y=pd.to_numeric(paired_df.iloc[:,paired_y[curve_name]],errors="coerce")
+                    valid=x.notna() & y.notna()
+                    if valid.sum()<2:
+                        continue
+                    item={"name":curve_name,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
+                          "x_label":paired_axis_labels.get(curve_name,"X"),"y_label":"Intensity"}
+                    if curve_name in paired_error:
+                        error=pd.to_numeric(paired_df.iloc[:,paired_error[curve_name]],errors="coerce")
+                        item["error"]=np.abs(error[valid].to_numpy(float))
+                    paired_series.append(item)
+                if paired_series:
+                    return paired_series
+        except (ValueError,IndexError,pd.errors.ParserError):
+            pass
     if first_idx is not None and "\t" in lines[first_idx]:
         header_cells=lines[first_idx].split("\t")
         coordinate_columns=0
@@ -921,7 +995,9 @@ def export_curve_table(target_names, series, values_by_name, errors_by_name=None
         for n in targets[1:]
     )
     if same_grid:
-        data={"X":first_x}
+        x_label=str(lookup[targets[0]].get("x_label","X")).strip() or "X"
+        x_header="X" if x_label.casefold()=="x" else f"X [{x_label}]"
+        data={x_header:first_x}
         for n in targets:
             data[n]=np.asarray(values_by_name[n],dtype=float)
             error=(errors_by_name or {}).get(n,lookup[n].get("error"))
@@ -930,7 +1006,8 @@ def export_curve_table(target_names, series, values_by_name, errors_by_name=None
         return pd.DataFrame(data)
     data={}
     for n in targets:
-        data[f"{n} | X"]=np.asarray(lookup[n]["x"],dtype=float)
+        x_label=str(lookup[n].get("x_label","X")).strip() or "X"
+        data[f"{n} | X [{x_label}]"]=np.asarray(lookup[n]["x"],dtype=float)
         data[f"{n} | Y"]=np.asarray(values_by_name[n],dtype=float)
         error=(errors_by_name or {}).get(n,lookup[n].get("error"))
         if error is not None:
