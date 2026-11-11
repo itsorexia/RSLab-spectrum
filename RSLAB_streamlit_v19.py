@@ -1480,7 +1480,11 @@ with tabs[0]:
             st.session_state["graph_name_aliases"]=renamed
             if "graph_average_targets" in st.session_state:
                 st.session_state["graph_average_targets"]=[renamed.get(name,name) for name in st.session_state["graph_average_targets"]]
+            # Curve renaming changes the valid identifiers used by the preview,
+            # so refresh linked-error names and the plot list after applying aliases.
+            error_source_names=refresh_linked_errors(series)
             names=[s["name"] for s in series]
+            plot_names=[n for n in names if n not in error_source_names]
             signal_selected=[n for n in selected if n not in error_source_names]
             plot_selected=signal_selected
             fit_results=st.session_state.get("fit_results",[])
