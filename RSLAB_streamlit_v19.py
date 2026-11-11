@@ -1293,15 +1293,18 @@ style={}
 with tabs[0]:
     plot_col,settings_col=st.columns([2.2,1],gap="large")
     st.markdown("""<style>
-    div[data-testid="column"]:has(#graph-preview-sticky) {
-        position: sticky;
-        top: 0.75rem;
-        align-self: flex-start;
-        height: max-content;
-        z-index: 3;
+    div[data-testid="column"]:has(#graph-settings-scroll-anchor) {
+        height: calc(100vh - 1.5rem);
+        max-height: calc(100vh - 1.5rem);
+        overflow-y: auto;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
+        padding-right: 0.4rem;
     }
     </style>""",unsafe_allow_html=True)
     with settings_col:
+        st.markdown('<div id="graph-settings-scroll-anchor"></div>',unsafe_allow_html=True)
         st.subheader("그래프 설정")
         size_tab,axis_tab,stack_tab,visual_tab=st.tabs(["크기·글꼴","축 설정","수직 스택","비주얼"])
         with stack_tab:
