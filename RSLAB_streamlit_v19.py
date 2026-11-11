@@ -340,12 +340,16 @@ def processed_error(s, opts):
         return error/scale if scale>0 else error
     return error
 
-def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None):
+def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
+               scatter_marker=("o",True), error_capsize=3.0, error_capthick=1.0, error_linewidth=1.0):
     """Draw one series using the selected global plot style."""
     x=np.asarray(s["x"],dtype=float)
     y=np.asarray(y,dtype=float)
     if plot_style=="산점도":
-        return ax.scatter(x,y,label=label,color=color,s=18)
+        marker,filled=scatter_marker
+        facecolor=color if filled else "none"
+        return ax.scatter(x,y,label=label,marker=marker,s=34,
+                          facecolors=facecolor,edgecolors=color,linewidths=max(0.7,linewidth))
     if plot_style=="에러바":
         if error is None:
             return None
@@ -353,7 +357,8 @@ def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None):
         if len(err)!=len(y) or not np.isfinite(err).any():
             return None
         return ax.errorbar(x,y,yerr=err,fmt="o",linestyle="none",label=label,
-                           color=color,markersize=3.5,capsize=3,linewidth=max(0.8,linewidth))
+                           color=color,markersize=3.5,capsize=error_capsize,
+                           capthick=error_capthick,elinewidth=error_linewidth)
     return ax.plot(x,y,label=label,color=color,lw=linewidth)
 
 def compute_average_curve(target_names, series, values_by_name, axis_label):
@@ -703,6 +708,35 @@ def state_json(series):
         data.append({k:(v.tolist() if isinstance(v,np.ndarray) else v) for k,v in s.items()})
     return json.dumps(data,ensure_ascii=False)
 
+def refresh_linked_errors(items):
+    """Attach imported error-curve Y values to targets on the target X grid."""
+    lookup={item["name"]:item for item in items}
+    source_names={item.get("error_source") for item in items if item.get("error_source")}
+    for target in items:
+        source=lookup.get(target.get("error_source"))
+        if source is None:
+            target.pop("error",None)
+            continue
+        sx=np.asarray(source["x"],dtype=float)
+        sy=np.abs(np.asarray(source["raw"],dtype=float))
+        good=np.isfinite(sx)&np.isfinite(sy)
+        if good.sum()<2:
+            target.pop("error",None)
+            continue
+        sx,sy=sx[good],sy[good]
+        order=np.argsort(sx,kind="stable")
+        sx,sy=sx[order],sy[order]
+        unique_x,inverse=np.unique(sx,return_inverse=True)
+        if len(unique_x)!=len(sx):
+            sums=np.bincount(inverse,weights=sy)
+            counts=np.bincount(inverse)
+            sy=sums/counts
+            sx=unique_x
+        tx=np.asarray(target["x"],dtype=float)
+        err=np.interp(tx,sx,sy,left=np.nan,right=np.nan)
+        target["error"]=err
+    return source_names
+
 def make_series_names_unique(items, existing_names=()):
     """Give every curve a unique key so per-curve arrays cannot overwrite each other."""
     used=set(existing_names)
@@ -874,6 +908,32 @@ with st.sidebar:
                 valid=parsed_names.copy()
             st.session_state["graph_selected"]=valid
         mapped=[s for s in st.session_state.series if s.get("mapping_type") in ("time","space")]
+        all_names=[s["name"] for s in st.session_state.series]
+        linked_error_sources={s.get("error_source") for s in st.session_state.series if s.get("error_source")}
+        ordinary_candidates=[n for n in all_names if n not in linked_error_sources and
+                             not next((item.get("mapping_type") in ("time","space") for item in st.session_state.series if item["name"]==n),False)]
+        with st.expander("불러온 곡선에서 에러 데이터 지정",expanded=False):
+            st.caption("업로드 파일에서 오차값이 별도 곡선으로 읽혔다면, 그 곡선을 오차 데이터로 지정해 다른 곡선에 연결하세요. X값이 다르면 공통 범위에서 보간합니다.")
+            if len(ordinary_candidates)>=2:
+                target_name=st.selectbox("오차를 적용할 신호 곡선",ordinary_candidates,key="loaded_error_target")
+                error_choices=[n for n in all_names if n!=target_name and
+                               not next((item.get("mapping_type") in ("time","space") for item in st.session_state.series if item["name"]==n),False)]
+                source_name=st.selectbox("오차값으로 사용할 곡선",error_choices,key="loaded_error_source")
+                target_item=next(item for item in st.session_state.series if item["name"]==target_name)
+                if target_item.get("error_source"):
+                    st.caption(f"현재 연결: {target_item['error_source']}")
+                map_col,unlink_col=st.columns(2)
+                if map_col.button("에러 데이터 연결",key="loaded_error_link",use_container_width=True):
+                    target_item["error_source"]=source_name
+                    st.session_state.series=st.session_state.series
+                    st.rerun()
+                if unlink_col.button("연결 해제",key="loaded_error_unlink",disabled=not target_item.get("error_source"),use_container_width=True):
+                    target_item.pop("error_source",None)
+                    target_item.pop("error",None)
+                    st.session_state.series=st.session_state.series
+                    st.rerun()
+            else:
+                st.caption("에러 곡선을 연결하려면 일반 데이터 곡선이 2개 이상 필요합니다.")
 
 if not st.session_state.series:
     st.info("왼쪽에서 파일을 불러오거나 아래 빈 스프레드시트에 직접 데이터를 입력하세요.")
@@ -881,7 +941,9 @@ if not st.session_state.series:
     render_blank_spectrum("blank_start")
     st.stop()
 series=st.session_state.series
+error_source_names=refresh_linked_errors(series)
 names=[s["name"] for s in series]
+plot_names=[n for n in names if n not in error_source_names]
 
 @st.dialog("스프레드시트 편집",width="large")
 def show_curve_editor():
@@ -890,7 +952,7 @@ def show_curve_editor():
     if curve is None:
         st.warning("편집할 곡선을 찾을 수 없습니다.")
         return
-    st.caption(f"{curve_name}의 X/Y 데이터를 편집합니다. 빈 행은 저장할 때 제외됩니다.")
+    st.caption(f"{curve_name}의 X/Y와 선택적 Error 데이터를 편집합니다. 빈 행은 저장할 때 제외됩니다.")
     edit_key=st.session_state.get("curve_editor_table_key","curve_editor_table")
     edited=st.data_editor(st.session_state.get("curve_editor_table_data",pd.DataFrame()),
                           num_rows="dynamic",use_container_width=True,hide_index=True,key=edit_key,
@@ -987,7 +1049,7 @@ def selection_label(name):
     return f"{short_stem} · 시간={value:g}"
 with st.sidebar:
     st.markdown("**그릴 스펙트럼 선택**")
-    regular_names=[name for name in names if name not in mapped_names]
+    regular_names=[name for name in names if name not in mapped_names and name not in error_source_names]
     regular_key="graph_selected_regular"
     regular_values=st.session_state.get(regular_key)
     if regular_values is None or any(name not in regular_names for name in regular_values):
@@ -997,7 +1059,7 @@ with st.sidebar:
                    help="매핑 파일에 포함되지 않은 스펙트럼입니다.")
     selected_for_plot=list(st.session_state[regular_key])
     for source,group_specs in mapped_source_groups.items():
-        group_names=[s["name"] for s in group_specs]
+        group_names=[s["name"] for s in group_specs if s["name"] not in error_source_names]
         group_key=f"mapped_curve_selection::{source}"
         group_values=st.session_state.get(group_key)
         if group_values is None or any(name not in group_names for name in group_values):
@@ -1082,8 +1144,21 @@ with tabs[0]:
                     s["offset"]=st.number_input(f"{s['name']} 오프셋",value=float(s.get("offset",0)),key=f"off_{i}")
         with visual_tab:
             plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도","에러바"],key="graph_plot_style")
+            scatter_marker=("o",True)
+            error_capsize,error_capthick,error_linewidth=3.0,1.0,1.0
+            if plot_style=="산점도":
+                marker_options={"꽉 찬 원":("o",True),"안 찬 원":("o",False),
+                                "꽉 찬 네모":("s",True),"안 찬 네모":("s",False),
+                                "꽉 찬 삼각형":("^",True),"안 찬 삼각형":("^",False),
+                                "꽉 찬 마름모":("D",True),"안 찬 마름모":("D",False)}
+                marker_label=st.selectbox("점 모양",list(marker_options),key="graph_scatter_marker")
+                scatter_marker=marker_options[marker_label]
             if plot_style=="에러바":
-                st.caption("스프레드시트에서 오차 열을 연결한 곡선만 표시됩니다. 정규화 배율은 오차에도 반영되며, baseline·SG 필터의 오차 전파는 계산하지 않습니다.")
+                st.caption("스프레드시트의 오차 열 또는 불러온 오차 곡선을 연결한 데이터만 표시됩니다. 정규화 배율은 오차에도 반영되며, baseline·SG 필터의 오차 전파는 계산하지 않습니다.")
+                cap_col,line_col=st.columns(2)
+                error_capsize=cap_col.number_input("에러바 머리 길이 (pt)",min_value=0.0,max_value=15.0,value=3.0,step=0.5,key="graph_error_capsize")
+                error_capthick=line_col.number_input("에러바 머리 두께",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_capthick")
+                error_linewidth=st.number_input("에러 선 두께",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_linewidth")
             palette_upload=st.file_uploader("색상 팔레트 업로드 (이미지 / TXT / CSV)",
                                              type=["png","jpg","jpeg","webp","txt","csv"],
                                              key="graph_palette_upload",
@@ -1205,18 +1280,22 @@ with tabs[0]:
             if curve_name_error:
                 st.error(curve_name_error)
             renamed={old:new["name"] for old,new in zip(old_names,series)}
+            for item in series:
+                if item.get("error_source") in renamed:
+                    item["error_source"]=renamed[item["error_source"]]
             selected=[renamed.get(name,name) for name in selected]
             st.session_state["graph_name_aliases"]=renamed
             if "graph_average_targets" in st.session_state:
                 st.session_state["graph_average_targets"]=[renamed.get(name,name) for name in st.session_state["graph_average_targets"]]
             names=[s["name"] for s in series]
             selected_errors={s["name"]:s.get("error") for s in series}
-            plot_selected=([n for n in selected if selected_errors.get(n) is not None and
+            signal_selected=[n for n in selected if n not in error_source_names]
+            plot_selected=([n for n in signal_selected if selected_errors.get(n) is not None and
                             np.isfinite(np.asarray(selected_errors[n],dtype=float)).any()]
-                           if plot_style=="에러바" else list(selected))
+                           if plot_style=="에러바" else signal_selected)
             if plot_style=="에러바" and not plot_selected:
                 st.warning("에러바 스타일을 선택했지만, 선택된 곡선에 연결된 오차 데이터가 없습니다. 스프레드시트에서 오차 열을 연결해 주세요.")
-            elif plot_style=="에러바" and len(plot_selected)<len(selected):
+            elif plot_style=="에러바" and len(plot_selected)<len(signal_selected):
                 st.caption("오차 열이 지정되지 않은 곡선은 에러바 그래프에서 제외됩니다.")
 
         with size_tab:
@@ -1288,7 +1367,7 @@ with tabs[0]:
             st.markdown("**축 범위**")
             x_auto=st.checkbox("X축 자동 범위",value=True,key="graph_x_auto")
             x_log=st.checkbox("X축 로그 스케일",value=False,key="graph_x_log")
-            all_x=np.concatenate([np.asarray(s["x"],dtype=float) for s in series])
+            all_x=np.concatenate([np.asarray(s["x"],dtype=float) for s in series if s["name"] not in error_source_names])
             finite_x=all_x[np.isfinite(all_x)]
             positive_x=finite_x[finite_x>0]
             data_xmin=float(np.min(positive_x)) if x_log and positive_x.size else float(np.min(finite_x))
@@ -1302,7 +1381,7 @@ with tabs[0]:
             y_log=st.checkbox("Y축 로그 스케일",value=False,key="graph_y_log")
             if x_log or y_log:
                 st.caption("로그 스케일에서는 해당 축의 0 이하 값이 표시되지 않습니다.")
-            all_y=np.concatenate([np.asarray(transform(s,opts),dtype=float) for s in series])
+            all_y=np.concatenate([np.asarray(transform(s,opts),dtype=float) for s in series if s["name"] not in error_source_names])
             finite_y=all_y[np.isfinite(all_y)]
             positive_y=finite_y[finite_y>0]
             proc_min=float(np.min(positive_y)) if y_log and positive_y.size else float(np.min(finite_y))
@@ -1369,7 +1448,7 @@ with tabs[0]:
         # This keeps the gaps proportional when the user zooms into a narrower range.
         x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
         heights=[]
-        for n in names:
+        for n in plot_names:
             s=next(z for z in series if z["name"]==n)
             y_values=np.asarray(proc[n],dtype=float)
             visible=np.isfinite(s["x"]) & np.isfinite(y_values) & (s["x"]>=x_range_min) & (s["x"]<=x_range_max)
@@ -1377,7 +1456,7 @@ with tabs[0]:
             peak=float(np.nanmax(values)) if values.size else 0.0
             heights.append(max(peak*1.10,0.01))
         auto={}
-        for i,n in enumerate(names): auto[n]=sum(heights[i+1:]) if stack else 0
+        for i,n in enumerate(plot_names): auto[n]=sum(heights[i+1:]) if stack else 0
         # Draw the preview with the same Matplotlib renderer and settings as the PNG export.
         # The HTML layer only adds pointer crosshairs over the rendered image, so font
         # metrics, tick styling, labels, margins, and line placement remain unchanged.
@@ -1388,14 +1467,14 @@ with tabs[0]:
         for n in names:
             if n in plot_selected:
                 s=next(z for z in series if z["name"]==n)
-                off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
+                off=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
                 curve_x=np.asarray(s["x"],dtype=float)
                 curve_y=np.asarray(proc[n],dtype=float)+off
                 error_values=processed_error(s,opts)
                 if plot_style=="에러바" and error_values is None:
                     continue
                 draw_curve(preview_ax,s,curve_y,n,style[n]["color"],style[n]["linewidth"],
-                           plot_style,error_values)
+                           plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
                 valid=np.isfinite(curve_x)&np.isfinite(curve_y)
                 valid_indices=np.flatnonzero(valid)
                 if len(valid_indices)>20000:
@@ -1407,8 +1486,8 @@ with tabs[0]:
         if y_log: preview_ax.set_yscale("log")
         preview_ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
         if y_auto:
-            visible_limits=(visible_stack_log_ylim(series,proc,names,plot_selected,auto,offset_step,style,xmin,xmax)
-                            if y_log else visible_stack_ylim(series,proc,names,plot_selected,auto,offset_step,style,xmin,xmax))
+            visible_limits=(visible_stack_log_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax)
+                            if y_log else visible_stack_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax))
             if visible_limits:
                 preview_ax.set_ylim(*visible_limits)
         else:
@@ -1524,7 +1603,7 @@ with tabs[1]:
     st.caption("현재 사이드바의 SG 필터·baseline·normalization 처리를 반영해 평균을 계산합니다. X 간격이 서로 다르면 첫 곡선의 X 좌표에 맞춰 보간하고, 공통 X 범위만 사용합니다.")
     average_axis_labels=list(dict.fromkeys(str(s.get("x_label","X")) for s in series))
     average_axis=st.selectbox("평균 계산 X축",average_axis_labels,key="graph_average_axis")
-    average_candidates=[s["name"] for s in series if str(s.get("x_label","X"))==average_axis]
+    average_candidates=[s["name"] for s in series if s["name"] not in error_source_names and str(s.get("x_label","X"))==average_axis]
     average_default=[n for n in selected if n in average_candidates]
     if "graph_average_targets" in st.session_state:
         st.session_state["graph_average_targets"]=[n for n in st.session_state["graph_average_targets"] if n in average_candidates]
@@ -1560,7 +1639,7 @@ with tabs[2]:
     peak_tab,max_tab,range_stats_tab=st.tabs(["피크 찾기","맥스 인텐시티","범위 통계"])
     with peak_tab:
         st.subheader("피크 찾기")
-        target=st.selectbox("분석 곡선",names,key="peak_series")
+        target=st.selectbox("분석 곡선",plot_names,key="peak_series")
         prominence_col,distance_col=st.columns(2)
         prominence=prominence_col.number_input("최소 prominence",min_value=0.0,value=0.0)
         distance=distance_col.number_input("최소 피크 간격 (points)",min_value=1,value=1)
@@ -1574,25 +1653,25 @@ with tabs[2]:
             apply_plot_font(font_family)
             fig2,ax2=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
             apply_graph_frame(ax2,show_graph_frame,graph_frame_width)
-            peak_plot_names=[n for n in names if n in plot_selected]
-            if target not in peak_plot_names:
+            peak_plot_names=[n for n in plot_names if n in plot_selected]
+            if target not in peak_plot_names and target in plot_names:
                 peak_plot_names.append(target)
-            peak_target_offset=auto[target]+offset_step*list(names).index(target)+style[target]["offset"]
+            peak_target_offset=auto[target]+offset_step*plot_names.index(target)+style[target]["offset"]
             for n in peak_plot_names:
                 peak_s=next(z for z in series if z["name"]==n)
-                peak_offset=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
+                peak_offset=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
                 error_values=processed_error(peak_s,opts)
                 if plot_style=="에러바" and error_values is None:
                     continue
                 draw_curve(ax2,peak_s,proc[n]+peak_offset,n,style[n]["color"],style[n]["linewidth"],
-                           plot_style,error_values)
+                           plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
             ax2.scatter(s["x"][peaks],y[peaks]+peak_target_offset,color="red",zorder=5)
             if x_log: ax2.set_xscale("log")
             if y_log: ax2.set_yscale("log")
             ax2.set_xlim(min(xmin,xmax),max(xmin,xmax))
             if y_auto:
-                visible_limits=(visible_stack_log_ylim(series,proc,names,peak_plot_names,auto,offset_step,style,xmin,xmax)
-                               if y_log else visible_stack_ylim(series,proc,names,peak_plot_names,auto,offset_step,style,xmin,xmax))
+                visible_limits=(visible_stack_log_ylim(series,proc,plot_names,peak_plot_names,auto,offset_step,style,xmin,xmax)
+                               if y_log else visible_stack_ylim(series,proc,plot_names,peak_plot_names,auto,offset_step,style,xmin,xmax))
                 if visible_limits: ax2.set_ylim(*visible_limits)
             else: ax2.set_ylim(min(ymin,ymax),max(ymin,ymax))
             ax2.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color); ax2.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
@@ -1610,7 +1689,7 @@ with tabs[2]:
     with max_tab:
         st.subheader("선택 곡선의 최대 intensity")
         st.caption("왼쪽 처리 설정의 SG 필터, baseline 보정, normalization 결과에서 최대값을 계산합니다.")
-        max_targets=st.multiselect("최대값을 계산할 곡선",names,default=[n for n in selected if n in names],key="max_targets")
+        max_targets=st.multiselect("최대값을 계산할 곡선",plot_names,default=[n for n in selected if n in plot_names],key="max_targets")
         use_graph_range=st.checkbox("현재 그래프 X 범위 사용",value=True,key="max_use_graph_range")
         if use_graph_range:
             max_xmin,max_xmax=sorted((float(xmin),float(xmax)))
@@ -1657,7 +1736,7 @@ with tabs[2]:
         st.caption("선택한 X 범위에 실제로 포함되는 데이터 포인트만 사용합니다. 현재 처리 설정 또는 원본 intensity를 기준으로 계산할 수 있습니다.")
         axis_labels=list(dict.fromkeys(str(s.get("x_label","X")) for s in series))
         stats_axis=st.selectbox("X축 종류",axis_labels,key="range_stats_axis")
-        axis_series=[s for s in series if str(s.get("x_label","X"))==stats_axis]
+        axis_series=[s for s in series if s["name"] not in error_source_names and str(s.get("x_label","X"))==stats_axis]
         axis_names=[s["name"] for s in axis_series]
         default_stats=[n for n in selected if n in axis_names] or axis_names
         stats_targets=st.multiselect("계산할 곡선",axis_names,default=default_stats,key="range_stats_targets")
@@ -1712,7 +1791,7 @@ with tabs[3]:
     for n in names:
         if n in plot_selected:
             s=next(z for z in series if z["name"]==n)
-            off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
+            off=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
             error_values=processed_error(s,opts)
             if plot_style=="에러바" and error_values is None:
                 continue
@@ -1722,8 +1801,8 @@ with tabs[3]:
     if y_log: axout.set_yscale("log")
     axout.set_xlim(min(xmin,xmax),max(xmin,xmax))
     if y_auto:
-        visible_limits=(visible_stack_log_ylim(series,proc,names,plot_selected,auto,offset_step,style,xmin,xmax)
-                       if y_log else visible_stack_ylim(series,proc,names,plot_selected,auto,offset_step,style,xmin,xmax))
+        visible_limits=(visible_stack_log_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax)
+                       if y_log else visible_stack_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax))
         if visible_limits:
             ylo,yhi=visible_limits
             axout.set_ylim(ylo,yhi)
@@ -1765,16 +1844,17 @@ with tabs[3]:
 
     st.divider()
     c1,c2=st.columns(2)
-    c1.download_button("곡선별 원본 CSV ZIP",curve_archive(names,series,raw_values,"csv"),
+    exported_curve_names=[n for n in names if n not in error_source_names]
+    c1.download_button("곡선별 원본 CSV ZIP",curve_archive(exported_curve_names,series,raw_values,"csv"),
                        "spectra_original_csv.zip","application/zip",disabled=not names,use_container_width=True)
-    c2.download_button("곡선별 원본 TXT ZIP",curve_archive(names,series,raw_values,"txt"),
+    c2.download_button("곡선별 원본 TXT ZIP",curve_archive(exported_curve_names,series,raw_values,"txt"),
                        "spectra_original_txt.zip","application/zip",disabled=not names,use_container_width=True)
 
     st.divider()
     c1,c2=st.columns(2)
-    c1.download_button("곡선별 보정 CSV ZIP",curve_archive(names,series,corrected_values,"csv",corrected_errors),
+    c1.download_button("곡선별 보정 CSV ZIP",curve_archive(exported_curve_names,series,corrected_values,"csv",corrected_errors),
                        "spectra_corrected_csv.zip","application/zip",disabled=not names,use_container_width=True)
-    c2.download_button("곡선별 보정 TXT ZIP",curve_archive(names,series,corrected_values,"txt",corrected_errors),
+    c2.download_button("곡선별 보정 TXT ZIP",curve_archive(exported_curve_names,series,corrected_values,"txt",corrected_errors),
                        "spectra_corrected_txt.zip","application/zip",disabled=not names,use_container_width=True)
 
 with tabs[4]:
