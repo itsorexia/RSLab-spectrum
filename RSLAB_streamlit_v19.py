@@ -1292,554 +1292,539 @@ with st.sidebar:
 style={}
 with tabs[0]:
     plot_col,settings_col=st.columns([2.2,1],gap="large")
-    st.markdown("""<style>
-    div[data-testid="stHorizontalBlock"]:has(#graph-settings-scroll-anchor) > div[data-testid="column"]:nth-child(2) {
-        position: sticky !important;
-        top: 0.5rem !important;
-        align-self: flex-start !important;
-        box-sizing: border-box !important;
-        height: calc(100vh - 1rem) !important;
-        max-height: calc(100vh - 1rem) !important;
-        overflow-y: auto !important;
-        overflow-x: hidden !important;
-        overscroll-behavior: contain !important;
-        scrollbar-gutter: stable;
-        padding-right: 0.4rem !important;
-    }
-    </style>""",unsafe_allow_html=True)
     with settings_col:
-        st.markdown('<div id="graph-settings-scroll-anchor"></div>',unsafe_allow_html=True)
-        st.subheader("그래프 설정")
-        size_tab,axis_tab,stack_tab,visual_tab=st.tabs(["크기·글꼴","축 설정","수직 스택","비주얼"])
-        with stack_tab:
-            selected=st.session_state.get("graph_selected",names.copy())
-            stack=st.checkbox("수직 스택 사용",False,key="graph_stack")
-            offset_step=st.number_input("곡선 간 추가 간격",value=0.0,key="graph_stack_step")
-            st.caption("현재 X축 범위 안의 최대 intensity에 10%를 더해 자동 간격을 계산합니다. 첫 번째 곡선이 위쪽에 배치됩니다.")
-            with st.expander("곡선별 오프셋",expanded=False):
-                st.caption("각 곡선의 세로 위치를 개별 조정합니다.")
-                for i,s in enumerate(series):
-                    s["offset"]=st.number_input(f"{s['name']} 오프셋",value=float(s.get("offset",0)),key=f"off_{i}")
-        with visual_tab:
-            if st.session_state.get("graph_plot_style")=="에러바":
-                st.session_state["graph_plot_style"]="산점도"
-            plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도"],key="graph_plot_style")
-            scatter_marker=("o",True)
-            error_capsize,error_capthick,error_linewidth=3.0,1.0,1.0
-            if plot_style=="산점도":
-                marker_options={"꽉 찬 원":("o",True),"안 찬 원":("o",False),
-                                "꽉 찬 네모":("s",True),"안 찬 네모":("s",False),
-                                "꽉 찬 삼각형":("^",True),"안 찬 삼각형":("^",False),
-                                "꽉 찬 마름모":("D",True),"안 찬 마름모":("D",False)}
-                marker_label=st.selectbox("점 모양",list(marker_options),key="graph_scatter_marker")
-                scatter_marker=marker_options[marker_label]
-                has_error_data=any(s["name"] in selected and s.get("error") is not None and
-                                   np.isfinite(np.asarray(s["error"],dtype=float)).any() for s in series)
-                st.caption("연결된 오차 데이터가 있으면 산점도 점에 에러바가 함께 표시됩니다.")
-                if has_error_data:
-                    st.caption("정규화 배율은 오차에도 반영됩니다. baseline·SG 필터의 오차 전파는 계산하지 않습니다.")
-                    cap_col,thickness_col=st.columns(2)
-                    error_capsize=cap_col.number_input("에러바 머리 길이 (pt)",min_value=0.0,max_value=15.0,value=3.0,step=0.5,key="graph_error_capsize")
-                    error_linewidth=thickness_col.number_input("에러바 두께 (머리+선)",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_thickness")
-                    error_capthick=error_linewidth
-            fit_results=st.session_state.get("fit_results",[])
-            fit_ids=[fit["id"] for fit in fit_results]
-            pending_fit_id=st.session_state.pop("_pending_fit_overlay_id",None)
-            if pending_fit_id in fit_ids:
-                st.session_state["graph_show_fit_overlay"]=True
-                current_before=st.session_state.get("graph_visible_fit_ids",[])
-                st.session_state["graph_visible_fit_ids"]=list(dict.fromkeys([*current_before,pending_fit_id]))
-            if fit_ids:
-                valid_fit_ids=set(fit_ids)
-                current_fit_ids=st.session_state.get("graph_visible_fit_ids")
-                if current_fit_ids is None:
-                    st.session_state["graph_visible_fit_ids"]=fit_ids.copy()
-                else:
-                    st.session_state["graph_visible_fit_ids"]=[fit_id for fit_id in current_fit_ids if fit_id in valid_fit_ids]
-                show_fit_overlay=st.checkbox("피팅 곡선 그래프에 표시",value=True,key="graph_show_fit_overlay")
-                fit_labels={fit["id"]:f"{fit['curve_name']} · {fit['model']} · {fit['purpose']}" for fit in fit_results}
-                visible_fit_ids=(st.multiselect("표시할 피팅 결과",fit_ids,
-                                                format_func=lambda fit_id:fit_labels.get(fit_id,fit_id),
-                                                key="graph_visible_fit_ids") if show_fit_overlay else [])
-            else:
-                show_fit_overlay=False
-                visible_fit_ids=[]
-                st.caption("피팅 탭에서 결과를 계산하면 이 그래프에 겹쳐 표시할 수 있습니다.")
-            palette_upload=st.file_uploader("색상 팔레트 업로드 (이미지 / TXT / CSV)",
-                                             type=["png","jpg","jpeg","webp","txt","csv"],
-                                             key="graph_palette_upload",
-                                             help="이미지는 주요 색상 최대 16개를 추출하고, TXT/CSV는 #RRGGBB 코드를 파일 순서대로 읽습니다.")
-            palette_template=("# RSLAB color palette template\n"
-                              "# 한 줄에 HEX 색상 코드를 하나씩 입력하세요.\n"
-                              "#R4E4F2\n#76B7B2\n#59A14F\n#EDC948\n"
-                              "#F28E2B\n#E15759\n#B07AA1\n#4E79A7\n")
-            st.download_button("색상 팔레트 템플릿 다운로드",palette_template,
-                               "color_palette_template.txt","text/plain",key="palette_template_download")
-            try:
-                uploaded_palette=extract_uploaded_palette(palette_upload)
-            except Exception as e:
-                uploaded_palette=[]
-                st.warning(f"팔레트를 읽을 수 없습니다: {e}")
-            palette_options=["Origin","viridis","plasma","inferno","magma","cividis","turbo","coolwarm","rainbow"]
-            if uploaded_palette:
-                palette_options.append("업로드 팔레트")
-                st.caption(f"업로드 팔레트 색상 {len(uploaded_palette)}개")
-            elif st.session_state.get("graph_palette")=="업로드 팔레트":
-                st.session_state["graph_palette"]="Origin"
-            palette=st.selectbox("색상 팔레트",palette_options,key="graph_palette")
-            if palette=="업로드 팔레트":
-                preview_cols=st.columns(min(len(uploaded_palette),8))
-                for j,color in enumerate(uploaded_palette):
-                    with preview_cols[j%len(preview_cols)]:
-                        st.markdown(f"<div title='{color}' style='height:22px;background:{color};border:1px solid #d1d5db;border-radius:5px'></div><small>{color}</small>",unsafe_allow_html=True)
-                st.caption("각 선택 곡선의 메뉴에서 사용할 팔레트 색을 직접 고를 수 있습니다.")
-            color_mode=st.radio("색상 설정",["팔레트 사용","곡선별 지정"],horizontal=True,key="graph_color_mode")
-            width_mode=st.radio("선 굵기 설정",["전체 동일","곡선별 지정"],horizontal=True,key="graph_width_mode")
-            line_width=synced_float_control("전체 선 굵기",0.5,5.0,1.8,0.1,"graph_line_width")
-            show_graph_frame=st.checkbox("위쪽·오른쪽 테두리 표시",value=True,key="graph_show_frame",
-                                         help="체크를 해제해도 왼쪽 Y축과 아래쪽 X축 선은 유지됩니다.")
-            graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
-            old_names=names.copy()
-            with st.expander("곡선 순서 변경",expanded=False):
-                st.caption("곡선 옆의 ‘위로’ 또는 ‘아래로’를 누르면 그래프와 범례 순서가 바뀝니다.")
-                for order_i,curve in enumerate(series):
-                    order_name,up_col,down_col=st.columns([6,2,2],vertical_alignment="center")
-                    order_name.write(curve["name"])
-                    up_col.button("위로",key=f"curve_up_{order_i}",disabled=order_i==0,
-                                  on_click=move_curve,args=(order_i,-1),use_container_width=True)
-                    down_col.button("아래로",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
-                                    on_click=move_curve,args=(order_i,1),use_container_width=True)
-            st.markdown("**곡선 색상 및 선 굵기**")
-            selected_style_names=set(selected)
-            for i,s in enumerate(series):
-                if palette=="업로드 팔레트" and uploaded_palette:
-                    palette_index=round(i*(len(uploaded_palette)-1)/max(1,len(series)-1))
-                    palette_color=uploaded_palette[palette_index]
-                else:
-                    palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
-                if s["name"] in selected_style_names:
-                    with st.container(border=True):
-                        if palette=="업로드 팔레트" and uploaded_palette:
-                            name_col=st.container()
-                            s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
-                                                          label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
-                            palette_key=f"uploaded_palette_curve_color_{i}"
-                            if st.session_state.get(palette_key) not in uploaded_palette:
-                                st.session_state[palette_key]=palette_color
-                            st.caption("사용할 색상을 눌러 선택하세요.")
-                            for row_start in range(0,len(uploaded_palette),8):
-                                row_colors=uploaded_palette[row_start:row_start+8]
-                                swatch_cols=st.columns(len(row_colors),gap="small")
-                                css_rules=[]
-                                for row_index,color in enumerate(row_colors):
-                                    color_index=row_start+row_index
-                                    swatch_key=f"uploaded_palette_swatch_{i}_{color_index}"
-                                    is_current=st.session_state[palette_key]==color
-                                    rgb=np.asarray(to_rgb(color))
-                                    foreground="#111827" if float(np.dot(rgb,[0.299,0.587,0.114]))>0.58 else "#ffffff"
-                                    border="#17202a" if is_current else "#d1d5db"
-                                    css_rules.append(
-                                        f".st-key-{swatch_key} button{{background-color:{color}!important;"
-                                        f"color:{foreground}!important;border:2px solid {border}!important;"
-                                        "height:32px;min-height:32px;padding:0!important;border-radius:6px!important;"
-                                        "font-size:17px!important;line-height:1!important;}"
-                                        f".st-key-{swatch_key} button:hover{{filter:brightness(.88);border-color:#111827!important;}}")
-                                st.markdown("<style>"+"".join(css_rules)+"</style>",unsafe_allow_html=True)
-                                for row_index,color in enumerate(row_colors):
-                                    color_index=row_start+row_index
-                                    swatch_key=f"uploaded_palette_swatch_{i}_{color_index}"
-                                    with swatch_cols[row_index]:
-                                        if st.button("✓" if st.session_state[palette_key]==color else " ",
-                                                      key=swatch_key,help=f"팔레트 색상 {color_index+1}: {color}",
-                                                      use_container_width=True):
-                                            st.session_state[palette_key]=color
-                                            st.rerun()
-                            curve_color=st.session_state[palette_key]
-                        else:
-                            name_col,color_col=st.columns([8,1],vertical_alignment="center")
-                            s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
-                                                          label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
-                            if color_mode=="곡선별 지정":
-                                curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
-                                                                   label_visibility="collapsed")
-                            else:
-                                curve_color=palette_color
-                                color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
-                        curve_width=(synced_float_control("개별 선 굵기",0.5,10.0,float(line_width),0.1,f"lw_{i}")
-                                     if width_mode=="곡선별 지정" else float(line_width))
-                else:
-                    # Keep hidden curves' style available to other views without rendering
-                    # editors for spectra that are not currently selected.
-                    if palette=="업로드 팔레트" and uploaded_palette:
-                        palette_key=f"uploaded_palette_curve_color_{i}"
-                        saved_palette_color=st.session_state.get(palette_key)
-                        curve_color=saved_palette_color if saved_palette_color in uploaded_palette else palette_color
+        with st.container(height=650,border=False):
+            st.subheader("그래프 설정")
+            size_tab,axis_tab,stack_tab,visual_tab=st.tabs(["크기·글꼴","축 설정","수직 스택","비주얼"])
+            with stack_tab:
+                selected=st.session_state.get("graph_selected",names.copy())
+                stack=st.checkbox("수직 스택 사용",False,key="graph_stack")
+                offset_step=st.number_input("곡선 간 추가 간격",value=0.0,key="graph_stack_step")
+                st.caption("현재 X축 범위 안의 최대 intensity에 10%를 더해 자동 간격을 계산합니다. 첫 번째 곡선이 위쪽에 배치됩니다.")
+                with st.expander("곡선별 오프셋",expanded=False):
+                    st.caption("각 곡선의 세로 위치를 개별 조정합니다.")
+                    for i,s in enumerate(series):
+                        s["offset"]=st.number_input(f"{s['name']} 오프셋",value=float(s.get("offset",0)),key=f"off_{i}")
+            with visual_tab:
+                if st.session_state.get("graph_plot_style")=="에러바":
+                    st.session_state["graph_plot_style"]="산점도"
+                plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도"],key="graph_plot_style")
+                scatter_marker=("o",True)
+                error_capsize,error_capthick,error_linewidth=3.0,1.0,1.0
+                if plot_style=="산점도":
+                    marker_options={"꽉 찬 원":("o",True),"안 찬 원":("o",False),
+                                    "꽉 찬 네모":("s",True),"안 찬 네모":("s",False),
+                                    "꽉 찬 삼각형":("^",True),"안 찬 삼각형":("^",False),
+                                    "꽉 찬 마름모":("D",True),"안 찬 마름모":("D",False)}
+                    marker_label=st.selectbox("점 모양",list(marker_options),key="graph_scatter_marker")
+                    scatter_marker=marker_options[marker_label]
+                    has_error_data=any(s["name"] in selected and s.get("error") is not None and
+                                       np.isfinite(np.asarray(s["error"],dtype=float)).any() for s in series)
+                    st.caption("연결된 오차 데이터가 있으면 산점도 점에 에러바가 함께 표시됩니다.")
+                    if has_error_data:
+                        st.caption("정규화 배율은 오차에도 반영됩니다. baseline·SG 필터의 오차 전파는 계산하지 않습니다.")
+                        cap_col,thickness_col=st.columns(2)
+                        error_capsize=cap_col.number_input("에러바 머리 길이 (pt)",min_value=0.0,max_value=15.0,value=3.0,step=0.5,key="graph_error_capsize")
+                        error_linewidth=thickness_col.number_input("에러바 두께 (머리+선)",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_thickness")
+                        error_capthick=error_linewidth
+                fit_results=st.session_state.get("fit_results",[])
+                fit_ids=[fit["id"] for fit in fit_results]
+                pending_fit_id=st.session_state.pop("_pending_fit_overlay_id",None)
+                if pending_fit_id in fit_ids:
+                    st.session_state["graph_show_fit_overlay"]=True
+                    current_before=st.session_state.get("graph_visible_fit_ids",[])
+                    st.session_state["graph_visible_fit_ids"]=list(dict.fromkeys([*current_before,pending_fit_id]))
+                if fit_ids:
+                    valid_fit_ids=set(fit_ids)
+                    current_fit_ids=st.session_state.get("graph_visible_fit_ids")
+                    if current_fit_ids is None:
+                        st.session_state["graph_visible_fit_ids"]=fit_ids.copy()
                     else:
-                        curve_color=(st.session_state.get(f"color_{i}",palette_color)
-                                     if color_mode=="곡선별 지정" else palette_color)
-                    curve_width=(float(st.session_state.get(f"lw_{i}",st.session_state.get(f"lw_{i}_input",line_width)))
-                                 if width_mode=="곡선별 지정" else float(line_width))
-                style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
-            if not selected_style_names:
-                st.caption("색상과 굵기를 설정할 스펙트럼을 먼저 선택하세요.")
-            curve_name_error=st.session_state.pop("curve_name_error",None)
-            if curve_name_error:
-                st.error(curve_name_error)
-            renamed={old:new["name"] for old,new in zip(old_names,series)}
-            for item in series:
-                if item.get("error_source") in renamed:
-                    item["error_source"]=renamed[item["error_source"]]
-            for fit in st.session_state.get("fit_results",[]):
-                if fit.get("curve_name") in renamed:
-                    fit["curve_name"]=renamed[fit["curve_name"]]
-            selected=[renamed.get(name,name) for name in selected]
-            st.session_state["graph_name_aliases"]=renamed
-            if "graph_average_targets" in st.session_state:
-                st.session_state["graph_average_targets"]=[renamed.get(name,name) for name in st.session_state["graph_average_targets"]]
-            # Curve renaming changes the valid identifiers used by the preview,
-            # so refresh linked-error names and the plot list after applying aliases.
-            error_source_names=refresh_linked_errors(series)
-            names=[s["name"] for s in series]
-            plot_names=[n for n in names if n not in error_source_names]
-            signal_selected=[n for n in selected if n not in error_source_names]
-            plot_selected=signal_selected
-            fit_results=st.session_state.get("fit_results",[])
-            if fit_results:
-                with st.expander("피팅 곡선 순서 변경",expanded=False):
-                    st.caption("위·아래 버튼으로 피팅 곡선의 그리기 및 범례 순서를 바꿉니다. 뒤에 그려지는 곡선이 겹친 부분에서 위에 표시됩니다.")
-                    for fit_index,fit in enumerate(fit_results):
-                        fit_label=f"{fit['curve_name']} · {fit['model']} · {fit['purpose']}"
-                        order_col,up_col,down_col=st.columns([6,2,2],vertical_alignment="center")
-                        order_col.write(fit_label)
-                        up_col.button("위로",key=f"fit_up_{abs(hash(fit['id']))}",disabled=fit_index==0,
-                                       on_click=move_fit,args=(fit_index,-1),use_container_width=True)
-                        down_col.button("아래로",key=f"fit_down_{abs(hash(fit['id']))}",disabled=fit_index==len(fit_results)-1,
-                                         on_click=move_fit,args=(fit_index,1),use_container_width=True)
-                with st.expander("피팅 곡선 스타일",expanded=False):
-                    st.caption("각 피팅 결과의 색상, 선 종류, 선 굵기를 따로 설정합니다. 미리보기와 PNG 저장 그래프에 함께 적용됩니다.")
-                    line_styles={"실선":"-","파선":"--","점선":":","일점쇄선":"-."}
-                    reverse_line_styles={value:key for key,value in line_styles.items()}
-                    for fit_index,fit in enumerate(fit_results):
-                        fit_color_default=style.get(fit.get("curve_name"),{}).get("color","#d62728")
-                        saved_fit_style=fit.get("style",{})
-                        color_col,line_col,width_col=st.columns([1,1,1])
-                        color=color_col.color_picker(f"{fit['curve_name']} 색상",value=saved_fit_style.get("color",fit_color_default),
-                                                     key=f"fit_style_color_{abs(hash(fit['id']))}")
-                        line_label=line_col.selectbox(f"{fit['curve_name']} 선 종류",list(line_styles),
-                                                      index=list(line_styles).index(reverse_line_styles.get(saved_fit_style.get("linestyle","--"),"파선")),
-                                                      key=f"fit_style_line_{abs(hash(fit['id']))}")
-                        line_width=width_col.number_input(f"{fit['curve_name']} 굵기",min_value=0.5,max_value=6.0,
-                                                          value=float(saved_fit_style.get("linewidth",2.0)),step=0.1,
-                                                          key=f"fit_style_width_{abs(hash(fit['id']))}")
-                        fit["style"]={"color":color,"linestyle":line_styles[line_label],"linewidth":line_width}
-            overlay_fit_results=[fit for fit in st.session_state.get("fit_results",[])
-                                 if fit.get("id") in visible_fit_ids and fit.get("curve_name") in plot_selected]
-
-        with size_tab:
-            size_mode="전체 이미지 기준"
-            st.caption("전체 이미지 크기를 먼저 정하고, 필요하면 그 안의 플롯 박스 크기를 따로 지정합니다.")
-            st.markdown("#### 크기 및 여백")
-            size_c1,size_c2=st.columns(2)
-            plot_width=size_c1.number_input("전체 이미지 너비 (px)",min_value=100,max_value=10000,value=600,step=50,key="graph_width_px")
-            plot_height=size_c2.number_input("전체 이미지 높이 (px)",min_value=100,max_value=10000,value=400,step=50,key="graph_height_px")
-            canvas_width_px=int(plot_width)
-            canvas_height_px=int(plot_height)
-            set_plot_box=st.checkbox("플롯 박스 크기 직접 지정",value=False,key="graph_set_inner_size",
-                                     help="체크하면 전체 이미지 크기를 유지한 채 축 안쪽 박스 크기와 위치를 지정합니다.")
-            if set_plot_box:
-                # Keep the plot-box dimensions immediately below the toggle, side by side.
-                default_left=int(st.session_state.get("graph_margin_left",65))
-                default_bottom=int(st.session_state.get("graph_margin_bottom",50))
-                default_inner_width=max(50,int(canvas_width_px-default_left-20))
-                default_inner_height=max(50,int(canvas_height_px-default_bottom-30))
-                dim_col1,dim_col2=st.columns(2)
-                inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
-                inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
-            with st.expander("여백 설정",expanded=False):
-                if set_plot_box:
-                    st.markdown("**플롯 박스 위치 (px)**")
-                    pos_col1,pos_col2=st.columns(2)
-                    margin_left=pos_col1.number_input("왼쪽 위치",min_value=0,max_value=2000,value=90,step=5,key="graph_margin_left")
-                    margin_bottom=pos_col2.number_input("아래쪽 위치",min_value=0,max_value=2000,value=60,step=5,key="graph_margin_bottom")
-                    max_inner_width=max(1,canvas_width_px-int(margin_left)-1)
-                    max_inner_height=max(1,canvas_height_px-int(margin_bottom)-1)
-                    if inner_width>max_inner_width or inner_height>max_inner_height:
-                        st.error("플롯 박스와 왼쪽·아래쪽 위치의 합이 전체 이미지 크기를 넘습니다. 박스 크기나 위치를 줄여주세요.")
-                    safe_left=min(int(margin_left),canvas_width_px-2)
-                    safe_bottom=min(int(margin_bottom),canvas_height_px-2)
-                    safe_inner_width=min(int(inner_width),canvas_width_px-safe_left-1)
-                    safe_inner_height=min(int(inner_height),canvas_height_px-safe_bottom-1)
-                    margin_right=canvas_width_px-safe_left-safe_inner_width
-                    margin_top=canvas_height_px-safe_bottom-safe_inner_height
-                    plot_margins=(safe_left,margin_right,margin_top,safe_bottom)
-                    st.caption(f"자동 여백 · 오른쪽 {margin_right} px · 위쪽 {margin_top} px")
+                        st.session_state["graph_visible_fit_ids"]=[fit_id for fit_id in current_fit_ids if fit_id in valid_fit_ids]
+                    show_fit_overlay=st.checkbox("피팅 곡선 그래프에 표시",value=True,key="graph_show_fit_overlay")
+                    fit_labels={fit["id"]:f"{fit['curve_name']} · {fit['model']} · {fit['purpose']}" for fit in fit_results}
+                    visible_fit_ids=(st.multiselect("표시할 피팅 결과",fit_ids,
+                                                    format_func=lambda fit_id:fit_labels.get(fit_id,fit_id),
+                                                    key="graph_visible_fit_ids") if show_fit_overlay else [])
                 else:
-                    m1,m2=st.columns(2)
-                    margin_left=m1.number_input("왼쪽 여백",min_value=0,max_value=2000,value=90,step=5,key="graph_margin_left")
-                    margin_right=m2.number_input("오른쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_right")
-                    m3,m4=st.columns(2)
-                    margin_top=m3.number_input("위쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_top")
-                    margin_bottom=m4.number_input("아래쪽 여백",min_value=0,max_value=2000,value=60,step=5,key="graph_margin_bottom")
-                    plot_margins=(margin_left,margin_right,margin_top,margin_bottom)
-            plot_box_width=int(canvas_width_px-margin_left-margin_right)
-            plot_box_height=int(canvas_height_px-margin_top-margin_bottom)
-            export_dpi=st.number_input("미리보기 / PNG 저장 DPI",min_value=100,max_value=1200,value=300,step=50,key="graph_export_dpi",
-                                       help="미리보기와 PNG 저장에 같은 DPI를 적용합니다. DPI를 바꿔도 설정한 픽셀 크기는 유지됩니다.")
-            preview_dpi=export_dpi
-            base_font_options=["Arial","DejaVu Sans","Liberation Sans","Times New Roman"]
-            font_options=list(dict.fromkeys([*base_font_options,*sorted(BUNDLED_FONT_FAMILIES)]))
-            font_family=st.selectbox("글꼴",font_options,index=font_options.index("Arial"),key="graph_font_family")
-            if not font_family_available(font_family):
-                st.warning(f"{font_family} 글꼴 파일을 찾을 수 없습니다. 저장소의 fonts 폴더에 글꼴 파일을 넣어야 실제로 적용됩니다.")
-            axis_text_color=st.color_picker("축 글씨 색상",value="#000000",key="graph_axis_text_color")
-            axis_label_size=synced_font_control("축 제목 글자 크기",6,40,12,"graph_axis_font_size")
-            title_font_size=synced_font_control("그래프 제목 글자 크기",6,48,14,"graph_title_font_size")
-            tick_font_size=synced_font_control("눈금 글자 크기",6,32,10,"graph_tick_font_size")
-            legend_font_size=synced_font_control("범례 글자 크기",6,32,9,"graph_legend_font_size")
-        with axis_tab:
-            with st.expander("축 제목 / 그래프 제목",expanded=False):
-                xlab=st.text_input("X축 제목",series[0]["x_label"],key="graph_xlabel")
-                ylab=st.text_input("Y축 제목","Normalized Intensity" if normalization!="없음" else series[0]["y_label"],key="graph_ylabel")
-                title=st.text_input("그래프 제목",key="graph_title")
-            st.markdown("**축 범위**")
-            x_auto=st.checkbox("X축 자동 범위",value=True,key="graph_x_auto")
-            x_log=st.checkbox("X축 로그 스케일",value=False,key="graph_x_log")
-            all_x=np.concatenate([np.asarray(s["x"],dtype=float) for s in series if s["name"] not in error_source_names])
-            finite_x=all_x[np.isfinite(all_x)]
-            positive_x=finite_x[finite_x>0]
-            data_xmin=float(np.min(positive_x)) if x_log and positive_x.size else float(np.min(finite_x))
-            data_xmax=float(np.max(positive_x)) if x_log and positive_x.size else float(np.max(finite_x))
-            x1,x2=st.columns(2)
-            xmin=x1.number_input("X 최소",value=data_xmin,format="%.6g",disabled=x_auto,key="graph_xmin")
-            xmax=x2.number_input("X 최대",value=data_xmax,format="%.6g",disabled=x_auto,key="graph_xmax")
-            opts["normalization_range"]=(tuple(sorted((float(xmin),float(xmax))))
-                                          if normalization_scope=="현재 그래프 X 범위" else None)
-            y_auto=st.checkbox("Y축 자동 범위",value=True,key="graph_y_auto")
-            y_log=st.checkbox("Y축 로그 스케일",value=False,key="graph_y_log")
-            if x_log or y_log:
-                st.caption("로그 스케일에서는 해당 축의 0 이하 값이 표시되지 않습니다.")
-            all_y=np.concatenate([np.asarray(transform(s,opts),dtype=float) for s in series if s["name"] not in error_source_names])
-            finite_y=all_y[np.isfinite(all_y)]
-            positive_y=finite_y[finite_y>0]
-            proc_min=float(np.min(positive_y)) if y_log and positive_y.size else float(np.min(finite_y))
-            proc_max=float(np.max(positive_y)) if y_log and positive_y.size else float(np.max(finite_y))
-            y1,y2=st.columns(2)
-            ymin=y1.number_input("Y 최소",value=proc_min,format="%.6g",disabled=y_auto,key="graph_ymin")
-            ymax=y2.number_input("Y 최대",value=proc_max,format="%.6g",disabled=y_auto,key="graph_ymax")
-            st.markdown("**눈금 표시 / 간격**")
-            ticks1,ticks2=st.columns(2)
-            x_bottom=ticks1.checkbox("아래 X 눈금",value=True,key="graph_x_bottom")
-            x_top=ticks1.checkbox("위 X 눈금",value=False,key="graph_x_top")
-            y_left=ticks2.checkbox("왼쪽 Y 눈금",value=True,key="graph_y_left")
-            y_right=ticks2.checkbox("오른쪽 Y 눈금",value=False,key="graph_y_right")
-            x_tick_interval=st.number_input("X 눈금 간격 (0=자동)",min_value=0.0,value=0.0,step=1.0,key="graph_x_tick_interval")
-            y_tick_interval=st.number_input("Y 눈금 간격 (0=자동)",min_value=0.0,value=0.0,step=0.1,key="graph_y_tick_interval")
-            with st.expander("눈금 숫자 표시 형식",expanded=False):
-                y_tick_options=axis_tick_options_ui(st.container(),"Y축","y_tick_label")
-                st.caption("Y축 눈금 표시 형식은 미리보기와 PNG 저장 그래프에 적용됩니다. 수식이 입력되면 표시 단위가 아닌 수식을 적용합니다.")
-            try:
-                y_tick_formatter=make_tick_formatter(y_tick_options)
-            except (ValueError,SyntaxError,ZeroDivisionError) as e:
-                st.error(f"Y축 눈금 수식 오류: {e}")
-                y_tick_options["formula"]=""
-                y_tick_formatter=make_tick_formatter(y_tick_options)
-            grid=st.checkbox("격자 표시",False,key="graph_grid")
-            legend=st.checkbox("범례 표시",True,key="graph_legend")
-            legend_locations={
-                "자동 (겹침 최소화)":"best",
-                "오른쪽 위":"upper right",
-                "왼쪽 위":"upper left",
-                "왼쪽 아래":"lower left",
-                "오른쪽 아래":"lower right",
-                "오른쪽 가운데":"center right",
-                "왼쪽 가운데":"center left",
-                "위 가운데":"upper center",
-                "아래 가운데":"lower center",
-                "가운데":"center",
-            }
-            legend_position=st.selectbox("범례 위치",list(legend_locations),disabled=not legend,key="graph_legend_location")
-            legend_loc=legend_locations[legend_position]
-        if not x_auto and xmin>=xmax:
-            st.error("X 최소값은 X 최대값보다 작아야 합니다.")
-            xmin,xmax=data_xmin,data_xmax
-        elif x_auto:
-            xmin,xmax=data_xmin,data_xmax
-        if not y_auto and ymin>=ymax:
-            st.error("Y 최소값은 Y 최대값보다 작아야 합니다.")
-            ymin,ymax=proc_min,proc_max
-        if x_log and xmin<=0:
-            st.error("X축 로그 스케일에서는 X 최소값이 0보다 커야 합니다.")
-            xmin=data_xmin
-        if y_log and (ymin<=0 or ymax<=0):
-            st.error("Y축 로그 스케일에서는 Y축 범위가 모두 0보다 커야 합니다.")
-            ymin,ymax=(float(np.min(positive_y)),float(np.max(positive_y))) if positive_y.size>1 else (1.0,10.0)
-        if x_log and not positive_x.size:
-            st.error("X축 로그 스케일에 사용할 양수 데이터가 없습니다.")
-        if y_log and not positive_y.size:
-            st.error("Y축 로그 스케일에 사용할 양수 데이터가 없습니다.")
+                    show_fit_overlay=False
+                    visible_fit_ids=[]
+                    st.caption("피팅 탭에서 결과를 계산하면 이 그래프에 겹쳐 표시할 수 있습니다.")
+                palette_upload=st.file_uploader("색상 팔레트 업로드 (이미지 / TXT / CSV)",
+                                                 type=["png","jpg","jpeg","webp","txt","csv"],
+                                                 key="graph_palette_upload",
+                                                 help="이미지는 주요 색상 최대 16개를 추출하고, TXT/CSV는 #RRGGBB 코드를 파일 순서대로 읽습니다.")
+                palette_template=("# RSLAB color palette template\n"
+                                  "# 한 줄에 HEX 색상 코드를 하나씩 입력하세요.\n"
+                                  "#R4E4F2\n#76B7B2\n#59A14F\n#EDC948\n"
+                                  "#F28E2B\n#E15759\n#B07AA1\n#4E79A7\n")
+                st.download_button("색상 팔레트 템플릿 다운로드",palette_template,
+                                   "color_palette_template.txt","text/plain",key="palette_template_download")
+                try:
+                    uploaded_palette=extract_uploaded_palette(palette_upload)
+                except Exception as e:
+                    uploaded_palette=[]
+                    st.warning(f"팔레트를 읽을 수 없습니다: {e}")
+                palette_options=["Origin","viridis","plasma","inferno","magma","cividis","turbo","coolwarm","rainbow"]
+                if uploaded_palette:
+                    palette_options.append("업로드 팔레트")
+                    st.caption(f"업로드 팔레트 색상 {len(uploaded_palette)}개")
+                elif st.session_state.get("graph_palette")=="업로드 팔레트":
+                    st.session_state["graph_palette"]="Origin"
+                palette=st.selectbox("색상 팔레트",palette_options,key="graph_palette")
+                if palette=="업로드 팔레트":
+                    preview_cols=st.columns(min(len(uploaded_palette),8))
+                    for j,color in enumerate(uploaded_palette):
+                        with preview_cols[j%len(preview_cols)]:
+                            st.markdown(f"<div title='{color}' style='height:22px;background:{color};border:1px solid #d1d5db;border-radius:5px'></div><small>{color}</small>",unsafe_allow_html=True)
+                    st.caption("각 선택 곡선의 메뉴에서 사용할 팔레트 색을 직접 고를 수 있습니다.")
+                color_mode=st.radio("색상 설정",["팔레트 사용","곡선별 지정"],horizontal=True,key="graph_color_mode")
+                width_mode=st.radio("선 굵기 설정",["전체 동일","곡선별 지정"],horizontal=True,key="graph_width_mode")
+                line_width=synced_float_control("전체 선 굵기",0.5,5.0,1.8,0.1,"graph_line_width")
+                show_graph_frame=st.checkbox("위쪽·오른쪽 테두리 표시",value=True,key="graph_show_frame",
+                                             help="체크를 해제해도 왼쪽 Y축과 아래쪽 X축 선은 유지됩니다.")
+                graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
+                old_names=names.copy()
+                with st.expander("곡선 순서 변경",expanded=False):
+                    st.caption("곡선 옆의 ‘위로’ 또는 ‘아래로’를 누르면 그래프와 범례 순서가 바뀝니다.")
+                    for order_i,curve in enumerate(series):
+                        order_name,up_col,down_col=st.columns([6,2,2],vertical_alignment="center")
+                        order_name.write(curve["name"])
+                        up_col.button("위로",key=f"curve_up_{order_i}",disabled=order_i==0,
+                                      on_click=move_curve,args=(order_i,-1),use_container_width=True)
+                        down_col.button("아래로",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
+                                        on_click=move_curve,args=(order_i,1),use_container_width=True)
+                st.markdown("**곡선 색상 및 선 굵기**")
+                selected_style_names=set(selected)
+                for i,s in enumerate(series):
+                    if palette=="업로드 팔레트" and uploaded_palette:
+                        palette_index=round(i*(len(uploaded_palette)-1)/max(1,len(series)-1))
+                        palette_color=uploaded_palette[palette_index]
+                    else:
+                        palette_color=to_hex(plt.get_cmap(palette)(i/max(1,len(series)-1)) if palette!="Origin" else plt.get_cmap("tab10")(i%10))
+                    if s["name"] in selected_style_names:
+                        with st.container(border=True):
+                            if palette=="업로드 팔레트" and uploaded_palette:
+                                name_col=st.container()
+                                s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
+                                                              label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
+                                palette_key=f"uploaded_palette_curve_color_{i}"
+                                if st.session_state.get(palette_key) not in uploaded_palette:
+                                    st.session_state[palette_key]=palette_color
+                                st.caption("사용할 색상을 눌러 선택하세요.")
+                                for row_start in range(0,len(uploaded_palette),8):
+                                    row_colors=uploaded_palette[row_start:row_start+8]
+                                    swatch_cols=st.columns(len(row_colors),gap="small")
+                                    css_rules=[]
+                                    for row_index,color in enumerate(row_colors):
+                                        color_index=row_start+row_index
+                                        swatch_key=f"uploaded_palette_swatch_{i}_{color_index}"
+                                        is_current=st.session_state[palette_key]==color
+                                        rgb=np.asarray(to_rgb(color))
+                                        foreground="#111827" if float(np.dot(rgb,[0.299,0.587,0.114]))>0.58 else "#ffffff"
+                                        border="#17202a" if is_current else "#d1d5db"
+                                        css_rules.append(
+                                            f".st-key-{swatch_key} button{{background-color:{color}!important;"
+                                            f"color:{foreground}!important;border:2px solid {border}!important;"
+                                            "height:32px;min-height:32px;padding:0!important;border-radius:6px!important;"
+                                            "font-size:17px!important;line-height:1!important;}"
+                                            f".st-key-{swatch_key} button:hover{{filter:brightness(.88);border-color:#111827!important;}}")
+                                    st.markdown("<style>"+"".join(css_rules)+"</style>",unsafe_allow_html=True)
+                                    for row_index,color in enumerate(row_colors):
+                                        color_index=row_start+row_index
+                                        swatch_key=f"uploaded_palette_swatch_{i}_{color_index}"
+                                        with swatch_cols[row_index]:
+                                            if st.button("✓" if st.session_state[palette_key]==color else " ",
+                                                          key=swatch_key,help=f"팔레트 색상 {color_index+1}: {color}",
+                                                          use_container_width=True):
+                                                st.session_state[palette_key]=color
+                                                st.rerun()
+                                curve_color=st.session_state[palette_key]
+                            else:
+                                name_col,color_col=st.columns([8,1],vertical_alignment="center")
+                                s["name"]=name_col.text_input("곡선 이름",value=s["name"],key=f"nm_{i}",
+                                                              label_visibility="collapsed",on_change=validate_curve_name,args=(i,))
+                                if color_mode=="곡선별 지정":
+                                    curve_color=color_col.color_picker("선 색상",value=palette_color,key=f"color_{i}",
+                                                                       label_visibility="collapsed")
+                                else:
+                                    curve_color=palette_color
+                                    color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
+                            curve_width=(synced_float_control("개별 선 굵기",0.5,10.0,float(line_width),0.1,f"lw_{i}")
+                                         if width_mode=="곡선별 지정" else float(line_width))
+                    else:
+                        # Keep hidden curves' style available to other views without rendering
+                        # editors for spectra that are not currently selected.
+                        if palette=="업로드 팔레트" and uploaded_palette:
+                            palette_key=f"uploaded_palette_curve_color_{i}"
+                            saved_palette_color=st.session_state.get(palette_key)
+                            curve_color=saved_palette_color if saved_palette_color in uploaded_palette else palette_color
+                        else:
+                            curve_color=(st.session_state.get(f"color_{i}",palette_color)
+                                         if color_mode=="곡선별 지정" else palette_color)
+                        curve_width=(float(st.session_state.get(f"lw_{i}",st.session_state.get(f"lw_{i}_input",line_width)))
+                                     if width_mode=="곡선별 지정" else float(line_width))
+                    style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
+                if not selected_style_names:
+                    st.caption("색상과 굵기를 설정할 스펙트럼을 먼저 선택하세요.")
+                curve_name_error=st.session_state.pop("curve_name_error",None)
+                if curve_name_error:
+                    st.error(curve_name_error)
+                renamed={old:new["name"] for old,new in zip(old_names,series)}
+                for item in series:
+                    if item.get("error_source") in renamed:
+                        item["error_source"]=renamed[item["error_source"]]
+                for fit in st.session_state.get("fit_results",[]):
+                    if fit.get("curve_name") in renamed:
+                        fit["curve_name"]=renamed[fit["curve_name"]]
+                selected=[renamed.get(name,name) for name in selected]
+                st.session_state["graph_name_aliases"]=renamed
+                if "graph_average_targets" in st.session_state:
+                    st.session_state["graph_average_targets"]=[renamed.get(name,name) for name in st.session_state["graph_average_targets"]]
+                # Curve renaming changes the valid identifiers used by the preview,
+                # so refresh linked-error names and the plot list after applying aliases.
+                error_source_names=refresh_linked_errors(series)
+                names=[s["name"] for s in series]
+                plot_names=[n for n in names if n not in error_source_names]
+                signal_selected=[n for n in selected if n not in error_source_names]
+                plot_selected=signal_selected
+                fit_results=st.session_state.get("fit_results",[])
+                if fit_results:
+                    with st.expander("피팅 곡선 순서 변경",expanded=False):
+                        st.caption("위·아래 버튼으로 피팅 곡선의 그리기 및 범례 순서를 바꿉니다. 뒤에 그려지는 곡선이 겹친 부분에서 위에 표시됩니다.")
+                        for fit_index,fit in enumerate(fit_results):
+                            fit_label=f"{fit['curve_name']} · {fit['model']} · {fit['purpose']}"
+                            order_col,up_col,down_col=st.columns([6,2,2],vertical_alignment="center")
+                            order_col.write(fit_label)
+                            up_col.button("위로",key=f"fit_up_{abs(hash(fit['id']))}",disabled=fit_index==0,
+                                           on_click=move_fit,args=(fit_index,-1),use_container_width=True)
+                            down_col.button("아래로",key=f"fit_down_{abs(hash(fit['id']))}",disabled=fit_index==len(fit_results)-1,
+                                             on_click=move_fit,args=(fit_index,1),use_container_width=True)
+                    with st.expander("피팅 곡선 스타일",expanded=False):
+                        st.caption("각 피팅 결과의 색상, 선 종류, 선 굵기를 따로 설정합니다. 미리보기와 PNG 저장 그래프에 함께 적용됩니다.")
+                        line_styles={"실선":"-","파선":"--","점선":":","일점쇄선":"-."}
+                        reverse_line_styles={value:key for key,value in line_styles.items()}
+                        for fit_index,fit in enumerate(fit_results):
+                            fit_color_default=style.get(fit.get("curve_name"),{}).get("color","#d62728")
+                            saved_fit_style=fit.get("style",{})
+                            color_col,line_col,width_col=st.columns([1,1,1])
+                            color=color_col.color_picker(f"{fit['curve_name']} 색상",value=saved_fit_style.get("color",fit_color_default),
+                                                         key=f"fit_style_color_{abs(hash(fit['id']))}")
+                            line_label=line_col.selectbox(f"{fit['curve_name']} 선 종류",list(line_styles),
+                                                          index=list(line_styles).index(reverse_line_styles.get(saved_fit_style.get("linestyle","--"),"파선")),
+                                                          key=f"fit_style_line_{abs(hash(fit['id']))}")
+                            line_width=width_col.number_input(f"{fit['curve_name']} 굵기",min_value=0.5,max_value=6.0,
+                                                              value=float(saved_fit_style.get("linewidth",2.0)),step=0.1,
+                                                              key=f"fit_style_width_{abs(hash(fit['id']))}")
+                            fit["style"]={"color":color,"linestyle":line_styles[line_label],"linewidth":line_width}
+                overlay_fit_results=[fit for fit in st.session_state.get("fit_results",[])
+                                     if fit.get("id") in visible_fit_ids and fit.get("curve_name") in plot_selected]
+
+            with size_tab:
+                size_mode="전체 이미지 기준"
+                st.caption("전체 이미지 크기를 먼저 정하고, 필요하면 그 안의 플롯 박스 크기를 따로 지정합니다.")
+                st.markdown("#### 크기 및 여백")
+                size_c1,size_c2=st.columns(2)
+                plot_width=size_c1.number_input("전체 이미지 너비 (px)",min_value=100,max_value=10000,value=600,step=50,key="graph_width_px")
+                plot_height=size_c2.number_input("전체 이미지 높이 (px)",min_value=100,max_value=10000,value=400,step=50,key="graph_height_px")
+                canvas_width_px=int(plot_width)
+                canvas_height_px=int(plot_height)
+                set_plot_box=st.checkbox("플롯 박스 크기 직접 지정",value=False,key="graph_set_inner_size",
+                                         help="체크하면 전체 이미지 크기를 유지한 채 축 안쪽 박스 크기와 위치를 지정합니다.")
+                if set_plot_box:
+                    # Keep the plot-box dimensions immediately below the toggle, side by side.
+                    default_left=int(st.session_state.get("graph_margin_left",65))
+                    default_bottom=int(st.session_state.get("graph_margin_bottom",50))
+                    default_inner_width=max(50,int(canvas_width_px-default_left-20))
+                    default_inner_height=max(50,int(canvas_height_px-default_bottom-30))
+                    dim_col1,dim_col2=st.columns(2)
+                    inner_width=dim_col1.number_input("플롯 박스 너비 (px)",min_value=50,max_value=10000,value=default_inner_width,step=25,key="graph_inner_width_px")
+                    inner_height=dim_col2.number_input("플롯 박스 높이 (px)",min_value=50,max_value=10000,value=default_inner_height,step=25,key="graph_inner_height_px")
+                with st.expander("여백 설정",expanded=False):
+                    if set_plot_box:
+                        st.markdown("**플롯 박스 위치 (px)**")
+                        pos_col1,pos_col2=st.columns(2)
+                        margin_left=pos_col1.number_input("왼쪽 위치",min_value=0,max_value=2000,value=90,step=5,key="graph_margin_left")
+                        margin_bottom=pos_col2.number_input("아래쪽 위치",min_value=0,max_value=2000,value=60,step=5,key="graph_margin_bottom")
+                        max_inner_width=max(1,canvas_width_px-int(margin_left)-1)
+                        max_inner_height=max(1,canvas_height_px-int(margin_bottom)-1)
+                        if inner_width>max_inner_width or inner_height>max_inner_height:
+                            st.error("플롯 박스와 왼쪽·아래쪽 위치의 합이 전체 이미지 크기를 넘습니다. 박스 크기나 위치를 줄여주세요.")
+                        safe_left=min(int(margin_left),canvas_width_px-2)
+                        safe_bottom=min(int(margin_bottom),canvas_height_px-2)
+                        safe_inner_width=min(int(inner_width),canvas_width_px-safe_left-1)
+                        safe_inner_height=min(int(inner_height),canvas_height_px-safe_bottom-1)
+                        margin_right=canvas_width_px-safe_left-safe_inner_width
+                        margin_top=canvas_height_px-safe_bottom-safe_inner_height
+                        plot_margins=(safe_left,margin_right,margin_top,safe_bottom)
+                        st.caption(f"자동 여백 · 오른쪽 {margin_right} px · 위쪽 {margin_top} px")
+                    else:
+                        m1,m2=st.columns(2)
+                        margin_left=m1.number_input("왼쪽 여백",min_value=0,max_value=2000,value=90,step=5,key="graph_margin_left")
+                        margin_right=m2.number_input("오른쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_right")
+                        m3,m4=st.columns(2)
+                        margin_top=m3.number_input("위쪽 여백",min_value=0,max_value=2000,value=30,step=5,key="graph_margin_top")
+                        margin_bottom=m4.number_input("아래쪽 여백",min_value=0,max_value=2000,value=60,step=5,key="graph_margin_bottom")
+                        plot_margins=(margin_left,margin_right,margin_top,margin_bottom)
+                plot_box_width=int(canvas_width_px-margin_left-margin_right)
+                plot_box_height=int(canvas_height_px-margin_top-margin_bottom)
+                export_dpi=st.number_input("미리보기 / PNG 저장 DPI",min_value=100,max_value=1200,value=300,step=50,key="graph_export_dpi",
+                                           help="미리보기와 PNG 저장에 같은 DPI를 적용합니다. DPI를 바꿔도 설정한 픽셀 크기는 유지됩니다.")
+                preview_dpi=export_dpi
+                base_font_options=["Arial","DejaVu Sans","Liberation Sans","Times New Roman"]
+                font_options=list(dict.fromkeys([*base_font_options,*sorted(BUNDLED_FONT_FAMILIES)]))
+                font_family=st.selectbox("글꼴",font_options,index=font_options.index("Arial"),key="graph_font_family")
+                if not font_family_available(font_family):
+                    st.warning(f"{font_family} 글꼴 파일을 찾을 수 없습니다. 저장소의 fonts 폴더에 글꼴 파일을 넣어야 실제로 적용됩니다.")
+                axis_text_color=st.color_picker("축 글씨 색상",value="#000000",key="graph_axis_text_color")
+                axis_label_size=synced_font_control("축 제목 글자 크기",6,40,12,"graph_axis_font_size")
+                title_font_size=synced_font_control("그래프 제목 글자 크기",6,48,14,"graph_title_font_size")
+                tick_font_size=synced_font_control("눈금 글자 크기",6,32,10,"graph_tick_font_size")
+                legend_font_size=synced_font_control("범례 글자 크기",6,32,9,"graph_legend_font_size")
+            with axis_tab:
+                with st.expander("축 제목 / 그래프 제목",expanded=False):
+                    xlab=st.text_input("X축 제목",series[0]["x_label"],key="graph_xlabel")
+                    ylab=st.text_input("Y축 제목","Normalized Intensity" if normalization!="없음" else series[0]["y_label"],key="graph_ylabel")
+                    title=st.text_input("그래프 제목",key="graph_title")
+                st.markdown("**축 범위**")
+                x_auto=st.checkbox("X축 자동 범위",value=True,key="graph_x_auto")
+                x_log=st.checkbox("X축 로그 스케일",value=False,key="graph_x_log")
+                all_x=np.concatenate([np.asarray(s["x"],dtype=float) for s in series if s["name"] not in error_source_names])
+                finite_x=all_x[np.isfinite(all_x)]
+                positive_x=finite_x[finite_x>0]
+                data_xmin=float(np.min(positive_x)) if x_log and positive_x.size else float(np.min(finite_x))
+                data_xmax=float(np.max(positive_x)) if x_log and positive_x.size else float(np.max(finite_x))
+                x1,x2=st.columns(2)
+                xmin=x1.number_input("X 최소",value=data_xmin,format="%.6g",disabled=x_auto,key="graph_xmin")
+                xmax=x2.number_input("X 최대",value=data_xmax,format="%.6g",disabled=x_auto,key="graph_xmax")
+                opts["normalization_range"]=(tuple(sorted((float(xmin),float(xmax))))
+                                              if normalization_scope=="현재 그래프 X 범위" else None)
+                y_auto=st.checkbox("Y축 자동 범위",value=True,key="graph_y_auto")
+                y_log=st.checkbox("Y축 로그 스케일",value=False,key="graph_y_log")
+                if x_log or y_log:
+                    st.caption("로그 스케일에서는 해당 축의 0 이하 값이 표시되지 않습니다.")
+                all_y=np.concatenate([np.asarray(transform(s,opts),dtype=float) for s in series if s["name"] not in error_source_names])
+                finite_y=all_y[np.isfinite(all_y)]
+                positive_y=finite_y[finite_y>0]
+                proc_min=float(np.min(positive_y)) if y_log and positive_y.size else float(np.min(finite_y))
+                proc_max=float(np.max(positive_y)) if y_log and positive_y.size else float(np.max(finite_y))
+                y1,y2=st.columns(2)
+                ymin=y1.number_input("Y 최소",value=proc_min,format="%.6g",disabled=y_auto,key="graph_ymin")
+                ymax=y2.number_input("Y 최대",value=proc_max,format="%.6g",disabled=y_auto,key="graph_ymax")
+                st.markdown("**눈금 표시 / 간격**")
+                ticks1,ticks2=st.columns(2)
+                x_bottom=ticks1.checkbox("아래 X 눈금",value=True,key="graph_x_bottom")
+                x_top=ticks1.checkbox("위 X 눈금",value=False,key="graph_x_top")
+                y_left=ticks2.checkbox("왼쪽 Y 눈금",value=True,key="graph_y_left")
+                y_right=ticks2.checkbox("오른쪽 Y 눈금",value=False,key="graph_y_right")
+                x_tick_interval=st.number_input("X 눈금 간격 (0=자동)",min_value=0.0,value=0.0,step=1.0,key="graph_x_tick_interval")
+                y_tick_interval=st.number_input("Y 눈금 간격 (0=자동)",min_value=0.0,value=0.0,step=0.1,key="graph_y_tick_interval")
+                with st.expander("눈금 숫자 표시 형식",expanded=False):
+                    y_tick_options=axis_tick_options_ui(st.container(),"Y축","y_tick_label")
+                    st.caption("Y축 눈금 표시 형식은 미리보기와 PNG 저장 그래프에 적용됩니다. 수식이 입력되면 표시 단위가 아닌 수식을 적용합니다.")
+                try:
+                    y_tick_formatter=make_tick_formatter(y_tick_options)
+                except (ValueError,SyntaxError,ZeroDivisionError) as e:
+                    st.error(f"Y축 눈금 수식 오류: {e}")
+                    y_tick_options["formula"]=""
+                    y_tick_formatter=make_tick_formatter(y_tick_options)
+                grid=st.checkbox("격자 표시",False,key="graph_grid")
+                legend=st.checkbox("범례 표시",True,key="graph_legend")
+                legend_locations={
+                    "자동 (겹침 최소화)":"best",
+                    "오른쪽 위":"upper right",
+                    "왼쪽 위":"upper left",
+                    "왼쪽 아래":"lower left",
+                    "오른쪽 아래":"lower right",
+                    "오른쪽 가운데":"center right",
+                    "왼쪽 가운데":"center left",
+                    "위 가운데":"upper center",
+                    "아래 가운데":"lower center",
+                    "가운데":"center",
+                }
+                legend_position=st.selectbox("범례 위치",list(legend_locations),disabled=not legend,key="graph_legend_location")
+                legend_loc=legend_locations[legend_position]
+            if not x_auto and xmin>=xmax:
+                st.error("X 최소값은 X 최대값보다 작아야 합니다.")
+                xmin,xmax=data_xmin,data_xmax
+            elif x_auto:
+                xmin,xmax=data_xmin,data_xmax
+            if not y_auto and ymin>=ymax:
+                st.error("Y 최소값은 Y 최대값보다 작아야 합니다.")
+                ymin,ymax=proc_min,proc_max
+            if x_log and xmin<=0:
+                st.error("X축 로그 스케일에서는 X 최소값이 0보다 커야 합니다.")
+                xmin=data_xmin
+            if y_log and (ymin<=0 or ymax<=0):
+                st.error("Y축 로그 스케일에서는 Y축 범위가 모두 0보다 커야 합니다.")
+                ymin,ymax=(float(np.min(positive_y)),float(np.max(positive_y))) if positive_y.size>1 else (1.0,10.0)
+            if x_log and not positive_x.size:
+                st.error("X축 로그 스케일에 사용할 양수 데이터가 없습니다.")
+            if y_log and not positive_y.size:
+                st.error("Y축 로그 스케일에 사용할 양수 데이터가 없습니다.")
     with plot_col:
-        st.markdown('<div id="graph-preview-sticky"></div>',unsafe_allow_html=True)
-        st.subheader("그래프 미리보기")
-        crosshair_enabled=st.checkbox("X/Y 좌표 십자선 표시",value=True,key="graph_crosshair_enabled")
-        proc={s["name"]:transform(s,opts) for s in series}
-        # Base the automatic vertical stack spacing on the visible X range.
-        # This keeps the gaps proportional when the user zooms into a narrower range.
-        x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
-        heights=[]
-        for n in plot_names:
-            s=next(z for z in series if z["name"]==n)
-            y_values=np.asarray(proc[n],dtype=float)
-            visible=np.isfinite(s["x"]) & np.isfinite(y_values) & (s["x"]>=x_range_min) & (s["x"]<=x_range_max)
-            values=y_values[visible] if np.any(visible) else y_values[np.isfinite(y_values)]
-            peak=float(np.nanmax(values)) if values.size else 0.0
-            heights.append(max(peak*1.10,0.01))
-        auto={}
-        for i,n in enumerate(plot_names): auto[n]=sum(heights[i+1:]) if stack else 0
-        # Draw the preview with the same Matplotlib renderer and settings as the PNG export.
-        # The HTML layer only adds pointer crosshairs over the rendered image, so font
-        # metrics, tick styling, labels, margins, and line placement remain unchanged.
-        apply_plot_font(font_family)
-        preview_mpl_fig,preview_ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
-        apply_graph_frame(preview_ax,show_graph_frame,graph_frame_width)
-        hover_curves=[]
-        for n in names:
-            if n in plot_selected:
+        with st.container(height=650,border=False):
+            st.subheader("그래프 미리보기")
+            crosshair_enabled=st.checkbox("X/Y 좌표 십자선 표시",value=True,key="graph_crosshair_enabled")
+            proc={s["name"]:transform(s,opts) for s in series}
+            # Base the automatic vertical stack spacing on the visible X range.
+            # This keeps the gaps proportional when the user zooms into a narrower range.
+            x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
+            heights=[]
+            for n in plot_names:
                 s=next(z for z in series if z["name"]==n)
-                off=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
-                curve_x=np.asarray(s["x"],dtype=float)
-                curve_y=np.asarray(proc[n],dtype=float)+off
-                error_values=processed_error(s,opts)
-                draw_curve(preview_ax,s,curve_y,n,style[n]["color"],style[n]["linewidth"],
-                           plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
-                valid=np.isfinite(curve_x)&np.isfinite(curve_y)
-                valid_indices=np.flatnonzero(valid)
-                if len(valid_indices)>20000:
-                    valid_indices=valid_indices[np.linspace(0,len(valid_indices)-1,20000,dtype=int)]
-                order=np.argsort(curve_x[valid_indices])
-                hover_curves.append({"name":n,"x":curve_x[valid_indices][order].tolist(),
-                                     "y":curve_y[valid_indices][order].tolist()})
-        if show_fit_overlay:
-            draw_fit_overlays(preview_ax,overlay_fit_results,visible_fit_ids,plot_selected,plot_names,auto,offset_step,style)
-        if x_log: preview_ax.set_xscale("log")
-        if y_log: preview_ax.set_yscale("log")
-        preview_ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
-        if y_auto:
-            visible_limits=(visible_stack_log_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax)
-                            if y_log else visible_stack_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax))
-            visible_limits=extend_ylim_for_fit(visible_limits,overlay_fit_results,visible_fit_ids,
-                                               plot_selected,plot_names,auto,offset_step,style,
-                                               xmin,xmax,y_log)
-            if visible_limits:
-                preview_ax.set_ylim(*visible_limits)
-        else:
-            preview_ax.set_ylim(min(ymin,ymax),max(ymin,ymax))
-        preview_ax.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color)
-        preview_ax.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
-        preview_ax.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
-        preview_ax.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,
-                               labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
-        preview_ax.tick_params(axis="y",which="both",left=y_left,right=y_right,
-                               labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
-        if x_tick_interval>0 and not x_log:
-            preview_ax.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
-        if y_tick_interval>0 and not y_log:
-            preview_ax.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
-        preview_ax.yaxis.set_major_formatter(y_tick_formatter)
-        add_y_scale_annotation(preview_ax,y_tick_options,tick_font_size,axis_text_color)
-        if legend:
-            preview_ax.legend(fontsize=legend_font_size,loc=legend_loc)
-        if grid:
-            preview_ax.grid(True,alpha=.3)
-        preview_ax.figure.canvas.draw()
-        preview_x_limits=preview_ax.get_xlim()
-        preview_y_limits=preview_ax.get_ylim()
-        axes_bbox=preview_ax.get_window_extent()
-        figure_bbox=preview_mpl_fig.bbox
-        overlay_box={
-            "left":float(axes_bbox.x0/figure_bbox.width*canvas_width_px),
-            "top":float((figure_bbox.height-axes_bbox.y1)/figure_bbox.height*canvas_height_px),
-            "width":float(axes_bbox.width/figure_bbox.width*canvas_width_px),
-            "height":float(axes_bbox.height/figure_bbox.height*canvas_height_px),
-        }
-        preview_png=render_png_fixed_size(preview_mpl_fig,canvas_width_px,canvas_height_px,preview_dpi)
-        plt.close(preview_mpl_fig)
-        preview_image_b64=base64.b64encode(preview_png).decode("ascii")
-        crosshair_script="""
-        const stage=document.getElementById('stage');
-        const svg=document.getElementById('crosshair');
-        const vx=document.getElementById('vertical');
-        const hy=document.getElementById('horizontal');
-        const readout=document.getElementById('readout');
-        const plot={plot};
-        const curves={curves};
-        const width={width}, height={height};
-        const xlim={xlim}, ylim={ylim};
-        const enabled={enabled};
-        const xlog={xlog}, ylog={ylog};
-        const toAxis=(v,log)=>log?Math.log10(v):v;
-        const fromAxis=(v,log)=>log?Math.pow(10,v):v;
-        function lowerBound(values,target){{
-          let lo=0,hi=values.length;
-          while(lo<hi){{const mid=(lo+hi)>>1;if(values[mid]<target)lo=mid+1;else hi=mid;}}
-          return lo;
-        }}
-        if(enabled){{
-          stage.addEventListener('pointermove',(event)=>{{
-            const rect=stage.getBoundingClientRect();
-            const x=(event.clientX-rect.left)*width/rect.width;
-            const y=(event.clientY-rect.top)*height/rect.height;
-            if(x<plot.left || x>plot.left+plot.width || y<plot.top || y>plot.top+plot.height){{
-              svg.style.display='none'; readout.style.display='none'; return;
+                y_values=np.asarray(proc[n],dtype=float)
+                visible=np.isfinite(s["x"]) & np.isfinite(y_values) & (s["x"]>=x_range_min) & (s["x"]<=x_range_max)
+                values=y_values[visible] if np.any(visible) else y_values[np.isfinite(y_values)]
+                peak=float(np.nanmax(values)) if values.size else 0.0
+                heights.append(max(peak*1.10,0.01))
+            auto={}
+            for i,n in enumerate(plot_names): auto[n]=sum(heights[i+1:]) if stack else 0
+            # Draw the preview with the same Matplotlib renderer and settings as the PNG export.
+            # The HTML layer only adds pointer crosshairs over the rendered image, so font
+            # metrics, tick styling, labels, margins, and line placement remain unchanged.
+            apply_plot_font(font_family)
+            preview_mpl_fig,preview_ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
+            apply_graph_frame(preview_ax,show_graph_frame,graph_frame_width)
+            hover_curves=[]
+            for n in names:
+                if n in plot_selected:
+                    s=next(z for z in series if z["name"]==n)
+                    off=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
+                    curve_x=np.asarray(s["x"],dtype=float)
+                    curve_y=np.asarray(proc[n],dtype=float)+off
+                    error_values=processed_error(s,opts)
+                    draw_curve(preview_ax,s,curve_y,n,style[n]["color"],style[n]["linewidth"],
+                               plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
+                    valid=np.isfinite(curve_x)&np.isfinite(curve_y)
+                    valid_indices=np.flatnonzero(valid)
+                    if len(valid_indices)>20000:
+                        valid_indices=valid_indices[np.linspace(0,len(valid_indices)-1,20000,dtype=int)]
+                    order=np.argsort(curve_x[valid_indices])
+                    hover_curves.append({"name":n,"x":curve_x[valid_indices][order].tolist(),
+                                         "y":curve_y[valid_indices][order].tolist()})
+            if show_fit_overlay:
+                draw_fit_overlays(preview_ax,overlay_fit_results,visible_fit_ids,plot_selected,plot_names,auto,offset_step,style)
+            if x_log: preview_ax.set_xscale("log")
+            if y_log: preview_ax.set_yscale("log")
+            preview_ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
+            if y_auto:
+                visible_limits=(visible_stack_log_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax)
+                                if y_log else visible_stack_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax))
+                visible_limits=extend_ylim_for_fit(visible_limits,overlay_fit_results,visible_fit_ids,
+                                                   plot_selected,plot_names,auto,offset_step,style,
+                                                   xmin,xmax,y_log)
+                if visible_limits:
+                    preview_ax.set_ylim(*visible_limits)
+            else:
+                preview_ax.set_ylim(min(ymin,ymax),max(ymin,ymax))
+            preview_ax.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color)
+            preview_ax.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
+            preview_ax.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
+            preview_ax.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,
+                                   labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
+            preview_ax.tick_params(axis="y",which="both",left=y_left,right=y_right,
+                                   labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
+            if x_tick_interval>0 and not x_log:
+                preview_ax.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
+            if y_tick_interval>0 and not y_log:
+                preview_ax.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
+            preview_ax.yaxis.set_major_formatter(y_tick_formatter)
+            add_y_scale_annotation(preview_ax,y_tick_options,tick_font_size,axis_text_color)
+            if legend:
+                preview_ax.legend(fontsize=legend_font_size,loc=legend_loc)
+            if grid:
+                preview_ax.grid(True,alpha=.3)
+            preview_ax.figure.canvas.draw()
+            preview_x_limits=preview_ax.get_xlim()
+            preview_y_limits=preview_ax.get_ylim()
+            axes_bbox=preview_ax.get_window_extent()
+            figure_bbox=preview_mpl_fig.bbox
+            overlay_box={
+                "left":float(axes_bbox.x0/figure_bbox.width*canvas_width_px),
+                "top":float((figure_bbox.height-axes_bbox.y1)/figure_bbox.height*canvas_height_px),
+                "width":float(axes_bbox.width/figure_bbox.width*canvas_width_px),
+                "height":float(axes_bbox.height/figure_bbox.height*canvas_height_px),
+            }
+            preview_png=render_png_fixed_size(preview_mpl_fig,canvas_width_px,canvas_height_px,preview_dpi)
+            plt.close(preview_mpl_fig)
+            preview_image_b64=base64.b64encode(preview_png).decode("ascii")
+            crosshair_script="""
+            const stage=document.getElementById('stage');
+            const svg=document.getElementById('crosshair');
+            const vx=document.getElementById('vertical');
+            const hy=document.getElementById('horizontal');
+            const readout=document.getElementById('readout');
+            const plot={plot};
+            const curves={curves};
+            const width={width}, height={height};
+            const xlim={xlim}, ylim={ylim};
+            const enabled={enabled};
+            const xlog={xlog}, ylog={ylog};
+            const toAxis=(v,log)=>log?Math.log10(v):v;
+            const fromAxis=(v,log)=>log?Math.pow(10,v):v;
+            function lowerBound(values,target){{
+              let lo=0,hi=values.length;
+              while(lo<hi){{const mid=(lo+hi)>>1;if(values[mid]<target)lo=mid+1;else hi=mid;}}
+              return lo;
             }}
-            const valueX=fromAxis(toAxis(xlim[0],xlog)+(x-plot.left)/plot.width*(toAxis(xlim[1],xlog)-toAxis(xlim[0],xlog)),xlog);
-            const valueY=fromAxis(toAxis(ylim[1],ylog)-(y-plot.top)/plot.height*(toAxis(ylim[1],ylog)-toAxis(ylim[0],ylog)),ylog);
-            let closest=null,closestDistance=20*20;
-            for(const curve of curves){{
-              const i=lowerBound(curve.x,valueX);
-              for(let j=Math.max(0,i-2);j<Math.min(curve.x.length,i+2);j++){{
-                if((xlog&&curve.x[j]<=0)||(ylog&&curve.y[j]<=0)) continue;
-                const px=plot.left+(toAxis(curve.x[j],xlog)-toAxis(xlim[0],xlog))/(toAxis(xlim[1],xlog)-toAxis(xlim[0],xlog))*plot.width;
-                const py=plot.top+(toAxis(ylim[1],ylog)-toAxis(curve.y[j],ylog))/(toAxis(ylim[1],ylog)-toAxis(ylim[0],ylog))*plot.height;
-                const distance=(px-x)*(px-x)+(py-y)*(py-y);
-                if(distance<closestDistance){{closestDistance=distance;closest={{name:curve.name,x:curve.x[j],y:curve.y[j]}};}}
-              }}
+            if(enabled){{
+              stage.addEventListener('pointermove',(event)=>{{
+                const rect=stage.getBoundingClientRect();
+                const x=(event.clientX-rect.left)*width/rect.width;
+                const y=(event.clientY-rect.top)*height/rect.height;
+                if(x<plot.left || x>plot.left+plot.width || y<plot.top || y>plot.top+plot.height){{
+                  svg.style.display='none'; readout.style.display='none'; return;
+                }}
+                const valueX=fromAxis(toAxis(xlim[0],xlog)+(x-plot.left)/plot.width*(toAxis(xlim[1],xlog)-toAxis(xlim[0],xlog)),xlog);
+                const valueY=fromAxis(toAxis(ylim[1],ylog)-(y-plot.top)/plot.height*(toAxis(ylim[1],ylog)-toAxis(ylim[0],ylog)),ylog);
+                let closest=null,closestDistance=20*20;
+                for(const curve of curves){{
+                  const i=lowerBound(curve.x,valueX);
+                  for(let j=Math.max(0,i-2);j<Math.min(curve.x.length,i+2);j++){{
+                    if((xlog&&curve.x[j]<=0)||(ylog&&curve.y[j]<=0)) continue;
+                    const px=plot.left+(toAxis(curve.x[j],xlog)-toAxis(xlim[0],xlog))/(toAxis(xlim[1],xlog)-toAxis(xlim[0],xlog))*plot.width;
+                    const py=plot.top+(toAxis(ylim[1],ylog)-toAxis(curve.y[j],ylog))/(toAxis(ylim[1],ylog)-toAxis(ylim[0],ylog))*plot.height;
+                    const distance=(px-x)*(px-x)+(py-y)*(py-y);
+                    if(distance<closestDistance){{closestDistance=distance;closest={{name:curve.name,x:curve.x[j],y:curve.y[j]}};}}
+                  }}
+                }}
+                vx.setAttribute('x1',x); vx.setAttribute('x2',x);
+                vx.setAttribute('y1',plot.top); vx.setAttribute('y2',plot.top+plot.height);
+                hy.setAttribute('x1',plot.left); hy.setAttribute('x2',plot.left+plot.width);
+                hy.setAttribute('y1',y); hy.setAttribute('y2',y);
+                svg.style.display='block';
+                readout.textContent='커서  X: '+Number(valueX.toPrecision(6))+'   Y: '+Number(valueY.toPrecision(6))+
+                  (closest?'\\n'+closest.name+'  X: '+Number(closest.x.toPrecision(6))+'   Y: '+Number(closest.y.toPrecision(6)):'');
+                readout.style.display='block';
+              }});
+              stage.addEventListener('pointerleave',()=>{{svg.style.display='none';readout.style.display='none';}});
             }}
-            vx.setAttribute('x1',x); vx.setAttribute('x2',x);
-            vx.setAttribute('y1',plot.top); vx.setAttribute('y2',plot.top+plot.height);
-            hy.setAttribute('x1',plot.left); hy.setAttribute('x2',plot.left+plot.width);
-            hy.setAttribute('y1',y); hy.setAttribute('y2',y);
-            svg.style.display='block';
-            readout.textContent='커서  X: '+Number(valueX.toPrecision(6))+'   Y: '+Number(valueY.toPrecision(6))+
-              (closest?'\\n'+closest.name+'  X: '+Number(closest.x.toPrecision(6))+'   Y: '+Number(closest.y.toPrecision(6)):'');
-            readout.style.display='block';
-          }});
-          stage.addEventListener('pointerleave',()=>{{svg.style.display='none';readout.style.display='none';}});
-        }}
-        """.format(plot=json.dumps(overlay_box),curves=json.dumps(hover_curves,ensure_ascii=False,separators=(",",":")),
-                   width=canvas_width_px,height=canvas_height_px,
-                   xlim=json.dumps([float(preview_x_limits[0]),float(preview_x_limits[1])]),
-                   ylim=json.dumps([float(preview_y_limits[0]),float(preview_y_limits[1])]),
-                   enabled="true" if crosshair_enabled else "false",
-                   xlog="true" if x_log else "false",ylog="true" if y_log else "false")
-        preview_html=f"""<!doctype html><html><head><meta charset="utf-8"><style>
-        html,body{{margin:0;padding:0;overflow:hidden;background:transparent}}
-        #frame{{display:inline-block;padding:12px;background:#f3f6fa;border:1px solid #e1e7ef;
-          border-radius:10px;box-sizing:border-box}}
-        #stage{{position:relative;width:{canvas_width_px}px;height:{canvas_height_px}px;overflow:hidden}}
-        #graph{{display:block;width:{canvas_width_px}px;height:{canvas_height_px}px}}
-        #crosshair{{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none}}
-        #crosshair line{{stroke:#566573;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke}}
-        #readout{{display:none;position:absolute;right:7px;top:7px;padding:4px 7px;border:1px solid #aeb8c2;
-          border-radius:4px;background:rgba(255,255,255,.94);color:#263238;font:12px Arial,sans-serif;
-          white-space:pre-line;pointer-events:none}}
-        </style></head><body><div id="frame"><div id="stage">
-        <img id="graph" src="data:image/png;base64,{preview_image_b64}" alt="그래프 미리보기">
-        <svg id="crosshair" viewBox="0 0 {canvas_width_px} {canvas_height_px}" preserveAspectRatio="none">
-          <line id="vertical"></line><line id="horizontal"></line></svg>
-        <div id="readout"></div></div></div><script>{crosshair_script}</script></body></html>"""
-        components.html(preview_html,width=canvas_width_px+26,height=canvas_height_px+26,scrolling=False)
-        st.caption("그래프 위에 마우스를 올리면 십자선의 X/Y 좌표와 가까운 곡선의 이름 및 실제 데이터 X/Y 값이 표시됩니다.")
-        st.caption(f"캔버스 {canvas_width_px} × {canvas_height_px} px · 플롯 박스 {plot_box_width} × {plot_box_height} px · 곡선 {len(series)}개")
+            """.format(plot=json.dumps(overlay_box),curves=json.dumps(hover_curves,ensure_ascii=False,separators=(",",":")),
+                       width=canvas_width_px,height=canvas_height_px,
+                       xlim=json.dumps([float(preview_x_limits[0]),float(preview_x_limits[1])]),
+                       ylim=json.dumps([float(preview_y_limits[0]),float(preview_y_limits[1])]),
+                       enabled="true" if crosshair_enabled else "false",
+                       xlog="true" if x_log else "false",ylog="true" if y_log else "false")
+            preview_html=f"""<!doctype html><html><head><meta charset="utf-8"><style>
+            html,body{{margin:0;padding:0;overflow:hidden;background:transparent}}
+            #frame{{display:inline-block;padding:12px;background:#f3f6fa;border:1px solid #e1e7ef;
+              border-radius:10px;box-sizing:border-box}}
+            #stage{{position:relative;width:{canvas_width_px}px;height:{canvas_height_px}px;overflow:hidden}}
+            #graph{{display:block;width:{canvas_width_px}px;height:{canvas_height_px}px}}
+            #crosshair{{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none}}
+            #crosshair line{{stroke:#566573;stroke-width:1;stroke-dasharray:4 3;vector-effect:non-scaling-stroke}}
+            #readout{{display:none;position:absolute;right:7px;top:7px;padding:4px 7px;border:1px solid #aeb8c2;
+              border-radius:4px;background:rgba(255,255,255,.94);color:#263238;font:12px Arial,sans-serif;
+              white-space:pre-line;pointer-events:none}}
+            </style></head><body><div id="frame"><div id="stage">
+            <img id="graph" src="data:image/png;base64,{preview_image_b64}" alt="그래프 미리보기">
+            <svg id="crosshair" viewBox="0 0 {canvas_width_px} {canvas_height_px}" preserveAspectRatio="none">
+              <line id="vertical"></line><line id="horizontal"></line></svg>
+            <div id="readout"></div></div></div><script>{crosshair_script}</script></body></html>"""
+            components.html(preview_html,width=canvas_width_px+26,height=canvas_height_px+26,scrolling=False)
+            st.caption("그래프 위에 마우스를 올리면 십자선의 X/Y 좌표와 가까운 곡선의 이름 및 실제 데이터 X/Y 값이 표시됩니다.")
+            st.caption(f"캔버스 {canvas_width_px} × {canvas_height_px} px · 플롯 박스 {plot_box_width} × {plot_box_height} px · 곡선 {len(series)}개")
 
 with tabs[1]:
     st.subheader("선택 곡선 평균")
