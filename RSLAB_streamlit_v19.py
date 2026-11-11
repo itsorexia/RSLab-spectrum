@@ -1802,6 +1802,8 @@ with tabs[0]:
                    xlog="true" if x_log else "false",ylog="true" if y_log else "false")
         preview_html=f"""<!doctype html><html><head><meta charset="utf-8"><style>
         html,body{{margin:0;padding:0;overflow:hidden;background:transparent}}
+        #frame{{display:inline-block;padding:12px;background:#f3f6fa;border:1px solid #e1e7ef;
+          border-radius:10px;box-sizing:border-box}}
         #stage{{position:relative;width:{canvas_width_px}px;height:{canvas_height_px}px;overflow:hidden}}
         #graph{{display:block;width:{canvas_width_px}px;height:{canvas_height_px}px}}
         #crosshair{{position:absolute;inset:0;width:100%;height:100%;display:none;pointer-events:none}}
@@ -1809,12 +1811,12 @@ with tabs[0]:
         #readout{{display:none;position:absolute;right:7px;top:7px;padding:4px 7px;border:1px solid #aeb8c2;
           border-radius:4px;background:rgba(255,255,255,.94);color:#263238;font:12px Arial,sans-serif;
           white-space:pre-line;pointer-events:none}}
-        </style></head><body><div id="stage">
+        </style></head><body><div id="frame"><div id="stage">
         <img id="graph" src="data:image/png;base64,{preview_image_b64}" alt="그래프 미리보기">
         <svg id="crosshair" viewBox="0 0 {canvas_width_px} {canvas_height_px}" preserveAspectRatio="none">
           <line id="vertical"></line><line id="horizontal"></line></svg>
-        <div id="readout"></div></div><script>{crosshair_script}</script></body></html>"""
-        components.html(preview_html,width=canvas_width_px,height=canvas_height_px,scrolling=False)
+        <div id="readout"></div></div></div><script>{crosshair_script}</script></body></html>"""
+        components.html(preview_html,width=canvas_width_px+26,height=canvas_height_px+26,scrolling=False)
         st.caption("그래프 위에 마우스를 올리면 십자선의 X/Y 좌표와 가까운 곡선의 이름 및 실제 데이터 X/Y 값이 표시됩니다.")
         st.caption(f"캔버스 {canvas_width_px} × {canvas_height_px} px · 플롯 박스 {plot_box_width} × {plot_box_height} px · 곡선 {len(series)}개")
 
