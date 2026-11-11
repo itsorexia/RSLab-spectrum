@@ -1155,10 +1155,10 @@ with tabs[0]:
                 scatter_marker=marker_options[marker_label]
             if plot_style=="에러바":
                 st.caption("스프레드시트의 오차 열 또는 불러온 오차 곡선을 연결한 데이터만 표시됩니다. 정규화 배율은 오차에도 반영되며, baseline·SG 필터의 오차 전파는 계산하지 않습니다.")
-                cap_col,line_col=st.columns(2)
+                cap_col,thickness_col=st.columns(2)
                 error_capsize=cap_col.number_input("에러바 머리 길이 (pt)",min_value=0.0,max_value=15.0,value=3.0,step=0.5,key="graph_error_capsize")
-                error_capthick=line_col.number_input("에러바 머리 두께",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_capthick")
-                error_linewidth=st.number_input("에러 선 두께",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_linewidth")
+                error_linewidth=thickness_col.number_input("에러바 두께 (머리+선)",min_value=0.1,max_value=5.0,value=1.0,step=0.1,key="graph_error_thickness")
+                error_capthick=error_linewidth
             palette_upload=st.file_uploader("색상 팔레트 업로드 (이미지 / TXT / CSV)",
                                              type=["png","jpg","jpeg","webp","txt","csv"],
                                              key="graph_palette_upload",
