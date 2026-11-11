@@ -760,7 +760,7 @@ def render_blank_spectrum(prefix):
 with st.sidebar:
     st.header("데이터")
     uploads=st.file_uploader("CSV / TSV / TXT 파일",type=["csv","tsv","txt","dat","asc"],accept_multiple_files=True)
-    if st.button("파일 불러오기", type="primary", use_container_width=True):
+    if st.button("데이터 불러오기", type="primary", use_container_width=True):
         loaded=[]; errors=[]
         previous_names=[s["name"] for s in st.session_state.series]
         for f in uploads or []:
