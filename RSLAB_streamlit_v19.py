@@ -311,6 +311,51 @@ def transform(s, opts):
     elif mode=="Custom divisor" and opts["divisor"]!=0: y=y/opts["divisor"]
     return y
 
+def processed_error(s, opts):
+    """Return supplied Y uncertainties in the same units as the processed curve."""
+    error=s.get("error")
+    if error is None:
+        return None
+    error=np.abs(np.asarray(error,dtype=float))
+    mode=opts.get("normalization","없음")
+    if mode=="없음":
+        return error
+    before_norm={**opts,"normalization":"없음","normalization_range":None}
+    y=transform(s,before_norm)
+    reference=y
+    x=np.asarray(s["x"],dtype=float)
+    selected_range=opts.get("normalization_range")
+    if selected_range is not None:
+        lo,hi=sorted((float(selected_range[0]),float(selected_range[1])))
+        mask=np.isfinite(x)&np.isfinite(y)&(x>=lo)&(x<=hi)
+        if np.any(mask): reference=y[mask]
+    if mode=="Min-max":
+        span=float(np.nanmax(reference)-np.nanmin(reference))
+        return error/span if span>0 else error
+    if mode=="Maximum":
+        scale=abs(float(np.nanmax(reference)))
+        return error/scale if scale>0 else error
+    if mode=="Custom divisor":
+        scale=abs(float(opts.get("divisor",1.0)))
+        return error/scale if scale>0 else error
+    return error
+
+def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None):
+    """Draw one series using the selected global plot style."""
+    x=np.asarray(s["x"],dtype=float)
+    y=np.asarray(y,dtype=float)
+    if plot_style=="산점도":
+        return ax.scatter(x,y,label=label,color=color,s=18)
+    if plot_style=="에러바":
+        if error is None:
+            return None
+        err=np.asarray(error,dtype=float)
+        if len(err)!=len(y) or not np.isfinite(err).any():
+            return None
+        return ax.errorbar(x,y,yerr=err,fmt="o",linestyle="none",label=label,
+                           color=color,markersize=3.5,capsize=3,linewidth=max(0.8,linewidth))
+    return ax.plot(x,y,label=label,color=color,lw=linewidth)
+
 def compute_average_curve(target_names, series, values_by_name, axis_label):
     """Average selected curves on the first selected curve's grid over their shared X range."""
     lookup={item["name"]:item for item in series}
@@ -672,7 +717,7 @@ def make_series_names_unique(items, existing_names=()):
         used.add(candidate)
     return items
 
-def export_curve_table(target_names, series, values_by_name):
+def export_curve_table(target_names, series, values_by_name, errors_by_name=None):
     """Keep each curve's original X/Y pairs intact in a convenient table."""
     targets=[n for n in target_names if n in values_by_name]
     if not targets:
@@ -688,14 +733,20 @@ def export_curve_table(target_names, series, values_by_name):
         data={"X":first_x}
         for n in targets:
             data[n]=np.asarray(values_by_name[n],dtype=float)
+            error=(errors_by_name or {}).get(n,lookup[n].get("error"))
+            if error is not None:
+                data[f"{n} | Error"]=np.asarray(error,dtype=float)
         return pd.DataFrame(data)
     data={}
     for n in targets:
         data[f"{n} | X"]=np.asarray(lookup[n]["x"],dtype=float)
         data[f"{n} | Y"]=np.asarray(values_by_name[n],dtype=float)
+        error=(errors_by_name or {}).get(n,lookup[n].get("error"))
+        if error is not None:
+            data[f"{n} | Error"]=np.asarray(error,dtype=float)
     return pd.DataFrame({key:pd.Series(value) for key,value in data.items()})
 
-def curve_archive(target_names, series, values_by_name, extension):
+def curve_archive(target_names, series, values_by_name, extension, errors_by_name=None):
     """Pack one exact X/Y data file per curve into a ZIP archive."""
     lookup={s["name"]:s for s in series}
     separator="\t" if extension=="txt" else ","
@@ -706,6 +757,9 @@ def curve_archive(target_names, series, values_by_name, extension):
             if name not in values_by_name or name not in lookup:
                 continue
             table=pd.DataFrame({"X":lookup[name]["x"],"Y":values_by_name[name]})
+            error=(errors_by_name or {}).get(name,lookup[name].get("error"))
+            if error is not None:
+                table["Error"]=np.asarray(error,dtype=float)
             safe_name=re.sub(r'[\\/:*?"<>|]+',"_",str(name)).strip(" ._") or f"spectrum_{index}"
             filename=f"{safe_name}.{extension}"
             if filename in used:
@@ -720,7 +774,7 @@ st.session_state.series=make_series_names_unique(st.session_state.series)
 
 def render_blank_spectrum(prefix):
     """Provide a spreadsheet-like grid for direct cell editing and multi-cell paste."""
-    st.caption("표의 첫 번째 셀(X)에 커서를 두고 엑셀에서 복사한 행렬을 Ctrl+V로 붙여넣으세요. 행은 자동으로 늘어납니다. Y열이 여러 개면 붙여넣기 전에 Y 데이터 열 수를 맞춰주세요.")
+    st.caption("표의 첫 번째 셀(X)에 커서를 두고 엑셀에서 복사한 행렬을 Ctrl+V로 붙여넣으세요. 에러바를 쓸 때는 Y 열과 오차 열 수를 설정하고, 각 Y에 연결할 오차 열을 선택하세요.")
     new_name=st.text_input("곡선 이름",value="새 스펙트럼",key=f"{prefix}_name")
     label1,label2=st.columns(2)
     x_label=label1.text_input("X축 이름",value="X",key=f"{prefix}_xlabel")
@@ -728,26 +782,47 @@ def render_blank_spectrum(prefix):
     y_count=st.number_input("붙여넣을 Y 데이터 열 수",min_value=1,max_value=20,value=1,step=1,
                             key=f"{prefix}_y_column_count",
                             help="X열을 제외한 Y열 수입니다. 예: X와 신호 3개를 붙여넣으려면 3을 선택하세요.")
-    columns=["X"]+(["Y"] if y_count==1 else [f"Y{i+1}" for i in range(int(y_count))])
-    editor_key=f"{prefix}_sheet_editor_{int(y_count)}"
+    y_columns=["Y"] if y_count==1 else [f"Y{i+1}" for i in range(int(y_count))]
+    error_enabled=st.checkbox("에러바 데이터 열 포함",value=False,key=f"{prefix}_error_enabled")
+    error_count=0
+    error_columns=[]
+    if error_enabled:
+        error_count=st.number_input("붙여넣을 오차 데이터 열 수",min_value=1,max_value=20,
+                                    value=int(y_count),step=1,key=f"{prefix}_error_column_count")
+        error_columns=["Error"] if error_count==1 else [f"Error{i+1}" for i in range(int(error_count))]
+    columns=["X",*y_columns,*error_columns]
+    editor_key=f"{prefix}_sheet_editor_{int(y_count)}_{int(error_count)}"
     sheet_data=pd.DataFrame(np.nan,index=range(20),columns=columns)
     config={col:st.column_config.NumberColumn(str(col),format="%.8g") for col in columns}
     edited=st.data_editor(sheet_data,num_rows="dynamic",use_container_width=True,hide_index=True,
                           height=420,key=editor_key,column_config=config,placeholder="")
+    error_for_y={}
+    if error_columns:
+        st.markdown("**Y 열과 에러바 열 연결**")
+        for yi,y_col in enumerate(y_columns):
+            default_error=error_columns[yi] if yi<len(error_columns) else "없음"
+            options=["없음",*error_columns]
+            default_index=options.index(default_error)
+            error_for_y[y_col]=st.selectbox(f"{y_col}의 에러바 열",options,index=default_index,
+                                            key=f"{prefix}_error_for_{yi}")
     if st.button("입력한 데이터로 그래프 그리기",type="primary",key=f"{prefix}_add"):
         x=pd.to_numeric(edited["X"],errors="coerce")
         base_name=str(new_name).strip() or "새 스펙트럼"
         new_items=[]
-        y_columns=[col for col in edited.columns if col!="X"]
         for col in y_columns:
             y=pd.to_numeric(edited[col],errors="coerce")
             valid=x.notna() & y.notna()
             if int(valid.sum())<2:
                 continue
             curve_name=base_name if len(y_columns)==1 else f"{base_name} · {col}"
-            new_items.append({"name":curve_name,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
-                              "x_label":str(x_label).strip() or "X",
-                              "y_label":str(y_label).strip() or "Intensity"})
+            item={"name":curve_name,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
+                  "x_label":str(x_label).strip() or "X",
+                  "y_label":str(y_label).strip() or "Intensity"}
+            err_col=error_for_y.get(col,"없음")
+            if err_col!="없음":
+                err=pd.to_numeric(edited[err_col],errors="coerce")
+                item["error"]=np.abs(err[valid].to_numpy(float))
+            new_items.append(item)
         if not new_items:
             st.error("그래프를 그리려면 X와 Y 열에 숫자 데이터가 2행 이상 필요합니다.")
         else:
@@ -780,7 +855,9 @@ with st.sidebar:
         session=st.file_uploader("세션 불러오기 (.json)",type="json",key="session_upload")
         if session and st.button("세션 적용"):
             raw=json.loads(session.getvalue().decode("utf-8"))
-            restored=[{**s,"x":np.asarray(s["x"]),"raw":np.asarray(s["raw"])} for s in raw]
+            restored=[{**s,"x":np.asarray(s["x"]),"raw":np.asarray(s["raw"]),
+                       **({"error":np.asarray(s["error"],dtype=float)} if s.get("error") is not None else {})}
+                      for s in raw]
             st.session_state.series=make_series_names_unique(restored)
             st.session_state["graph_selected"]=[s["name"] for s in st.session_state.series]
             st.rerun()
@@ -818,7 +895,8 @@ def show_curve_editor():
     edited=st.data_editor(st.session_state.get("curve_editor_table_data",pd.DataFrame()),
                           num_rows="dynamic",use_container_width=True,hide_index=True,key=edit_key,
                           column_config={"X":st.column_config.NumberColumn("X",format="%.8g"),
-                                         "Y":st.column_config.NumberColumn("Y",format="%.8g")})
+                                         "Y":st.column_config.NumberColumn("Y",format="%.8g"),
+                                         "Error":st.column_config.NumberColumn("Error (에러바)",format="%.8g")})
     apply_col,close_col=st.columns(2)
     if apply_col.button("수정 내용 적용",type="primary",key="curve_editor_apply"):
         x=pd.to_numeric(edited.get("X",pd.Series(dtype=float)),errors="coerce")
@@ -829,6 +907,12 @@ def show_curve_editor():
         else:
             curve["x"]=x[valid].to_numpy(float)
             curve["raw"]=y[valid].to_numpy(float)
+            error=pd.to_numeric(edited.get("Error",pd.Series(np.nan,index=edited.index)),errors="coerce")
+            error_values=np.abs(error[valid].to_numpy(float))
+            if np.isfinite(error_values).any():
+                curve["error"]=error_values
+            else:
+                curve.pop("error",None)
             curve.pop("mapping_type",None)
             curve.pop("mapping_coordinate",None)
             curve.pop("mapping_source",None)
@@ -997,6 +1081,9 @@ with tabs[0]:
                 for i,s in enumerate(series):
                     s["offset"]=st.number_input(f"{s['name']} 오프셋",value=float(s.get("offset",0)),key=f"off_{i}")
         with visual_tab:
+            plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도","에러바"],key="graph_plot_style")
+            if plot_style=="에러바":
+                st.caption("스프레드시트에서 오차 열을 연결한 곡선만 표시됩니다. 정규화 배율은 오차에도 반영되며, baseline·SG 필터의 오차 전파는 계산하지 않습니다.")
             palette_upload=st.file_uploader("색상 팔레트 업로드 (이미지 / TXT / CSV)",
                                              type=["png","jpg","jpeg","webp","txt","csv"],
                                              key="graph_palette_upload",
@@ -1123,6 +1210,14 @@ with tabs[0]:
             if "graph_average_targets" in st.session_state:
                 st.session_state["graph_average_targets"]=[renamed.get(name,name) for name in st.session_state["graph_average_targets"]]
             names=[s["name"] for s in series]
+            selected_errors={s["name"]:s.get("error") for s in series}
+            plot_selected=([n for n in selected if selected_errors.get(n) is not None and
+                            np.isfinite(np.asarray(selected_errors[n],dtype=float)).any()]
+                           if plot_style=="에러바" else list(selected))
+            if plot_style=="에러바" and not plot_selected:
+                st.warning("에러바 스타일을 선택했지만, 선택된 곡선에 연결된 오차 데이터가 없습니다. 스프레드시트에서 오차 열을 연결해 주세요.")
+            elif plot_style=="에러바" and len(plot_selected)<len(selected):
+                st.caption("오차 열이 지정되지 않은 곡선은 에러바 그래프에서 제외됩니다.")
 
         with size_tab:
             size_mode="전체 이미지 기준"
@@ -1291,12 +1386,16 @@ with tabs[0]:
         apply_graph_frame(preview_ax,show_graph_frame,graph_frame_width)
         hover_curves=[]
         for n in names:
-            if n in selected:
+            if n in plot_selected:
                 s=next(z for z in series if z["name"]==n)
                 off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
                 curve_x=np.asarray(s["x"],dtype=float)
                 curve_y=np.asarray(proc[n],dtype=float)+off
-                preview_ax.plot(curve_x,curve_y,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
+                error_values=processed_error(s,opts)
+                if plot_style=="에러바" and error_values is None:
+                    continue
+                draw_curve(preview_ax,s,curve_y,n,style[n]["color"],style[n]["linewidth"],
+                           plot_style,error_values)
                 valid=np.isfinite(curve_x)&np.isfinite(curve_y)
                 valid_indices=np.flatnonzero(valid)
                 if len(valid_indices)>20000:
@@ -1308,8 +1407,8 @@ with tabs[0]:
         if y_log: preview_ax.set_yscale("log")
         preview_ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
         if y_auto:
-            visible_limits=(visible_stack_log_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
-                            if y_log else visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax))
+            visible_limits=(visible_stack_log_ylim(series,proc,names,plot_selected,auto,offset_step,style,xmin,xmax)
+                            if y_log else visible_stack_ylim(series,proc,names,plot_selected,auto,offset_step,style,xmin,xmax))
             if visible_limits:
                 preview_ax.set_ylim(*visible_limits)
         else:
@@ -1475,14 +1574,18 @@ with tabs[2]:
             apply_plot_font(font_family)
             fig2,ax2=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
             apply_graph_frame(ax2,show_graph_frame,graph_frame_width)
-            peak_plot_names=[n for n in names if n in selected]
+            peak_plot_names=[n for n in names if n in plot_selected]
             if target not in peak_plot_names:
                 peak_plot_names.append(target)
             peak_target_offset=auto[target]+offset_step*list(names).index(target)+style[target]["offset"]
             for n in peak_plot_names:
                 peak_s=next(z for z in series if z["name"]==n)
                 peak_offset=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
-                ax2.plot(peak_s["x"],proc[n]+peak_offset,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
+                error_values=processed_error(peak_s,opts)
+                if plot_style=="에러바" and error_values is None:
+                    continue
+                draw_curve(ax2,peak_s,proc[n]+peak_offset,n,style[n]["color"],style[n]["linewidth"],
+                           plot_style,error_values)
             ax2.scatter(s["x"][peaks],y[peaks]+peak_target_offset,color="red",zorder=5)
             if x_log: ax2.set_xscale("log")
             if y_log: ax2.set_yscale("log")
@@ -1607,16 +1710,20 @@ with tabs[3]:
     figout,axout=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
     apply_graph_frame(axout,show_graph_frame,graph_frame_width)
     for n in names:
-        if n in selected:
+        if n in plot_selected:
             s=next(z for z in series if z["name"]==n)
             off=auto[n]+offset_step*list(names).index(n)+style[n]["offset"]
-            axout.plot(s["x"],proc[n]+off,label=n,color=style[n]["color"],lw=style[n]["linewidth"])
+            error_values=processed_error(s,opts)
+            if plot_style=="에러바" and error_values is None:
+                continue
+            draw_curve(axout,s,proc[n]+off,n,style[n]["color"],style[n]["linewidth"],
+                       plot_style,error_values)
     if x_log: axout.set_xscale("log")
     if y_log: axout.set_yscale("log")
     axout.set_xlim(min(xmin,xmax),max(xmin,xmax))
     if y_auto:
-        visible_limits=(visible_stack_log_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax)
-                       if y_log else visible_stack_ylim(series,proc,names,selected,auto,offset_step,style,xmin,xmax))
+        visible_limits=(visible_stack_log_ylim(series,proc,names,plot_selected,auto,offset_step,style,xmin,xmax)
+                       if y_log else visible_stack_ylim(series,proc,names,plot_selected,auto,offset_step,style,xmin,xmax))
         if visible_limits:
             ylo,yhi=visible_limits
             axout.set_ylim(ylo,yhi)
@@ -1639,6 +1746,7 @@ with tabs[3]:
     selected_targets=[n for n in selected if n in names]
     raw_values={s["name"]:np.asarray(s["raw"],dtype=float) for s in series}
     corrected_values={n:np.asarray(proc[n],dtype=float) for n in names}
+    corrected_errors={n:processed_error(s,opts) for s in series if s.get("error") is not None}
 
     raw_selected_table=export_curve_table(selected_targets,series,raw_values)
     c1,c2=st.columns(2)
@@ -1648,7 +1756,7 @@ with tabs[3]:
                        "selected_spectra_original.txt","text/plain",disabled=not selected_targets,use_container_width=True)
 
     st.divider()
-    corrected_selected_table=export_curve_table(selected_targets,series,corrected_values)
+    corrected_selected_table=export_curve_table(selected_targets,series,corrected_values,corrected_errors)
     c1,c2=st.columns(2)
     c1.download_button("선택 곡선 보정 CSV",corrected_selected_table.to_csv(index=False).encode("utf-8-sig"),
                        "selected_spectra_corrected.csv","text/csv",disabled=not selected_targets,use_container_width=True)
@@ -1664,9 +1772,9 @@ with tabs[3]:
 
     st.divider()
     c1,c2=st.columns(2)
-    c1.download_button("곡선별 보정 CSV ZIP",curve_archive(names,series,corrected_values,"csv"),
+    c1.download_button("곡선별 보정 CSV ZIP",curve_archive(names,series,corrected_values,"csv",corrected_errors),
                        "spectra_corrected_csv.zip","application/zip",disabled=not names,use_container_width=True)
-    c2.download_button("곡선별 보정 TXT ZIP",curve_archive(names,series,corrected_values,"txt"),
+    c2.download_button("곡선별 보정 TXT ZIP",curve_archive(names,series,corrected_values,"txt",corrected_errors),
                        "spectra_corrected_txt.zip","application/zip",disabled=not names,use_container_width=True)
 
 with tabs[4]:
@@ -1677,10 +1785,10 @@ with tabs[4]:
     if st.button("선택 곡선 스프레드시트 편집 창 열기",key="open_curve_editor"):
         curve=next(s for s in st.session_state.series if s["name"]==selected_curve)
         st.session_state["curve_editor_name"]=selected_curve
-        st.session_state["curve_editor_table_data"]=pd.DataFrame({
-            "X":np.asarray(curve["x"],dtype=float),
-            "Y":np.asarray(curve["raw"],dtype=float),
-        })
+        editor_data={"X":np.asarray(curve["x"],dtype=float),
+                     "Y":np.asarray(curve["raw"],dtype=float),
+                     "Error":np.asarray(curve.get("error",np.full(len(curve["x"]),np.nan)),dtype=float)}
+        st.session_state["curve_editor_table_data"]=pd.DataFrame(editor_data)
         st.session_state["curve_editor_table_key"]=f"curve_editor_table_{edit_names.index(selected_curve)}_{st.session_state.get('curve_editor_revision',0)}"
         st.session_state["curve_editor_revision"]=st.session_state.get("curve_editor_revision",0)+1
         st.session_state["curve_editor_open"]=True
