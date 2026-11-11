@@ -497,8 +497,11 @@ def draw_fit_overlays(ax, fits, visible_ids, plotted_names, plot_names, auto_off
         if fit.get("id") not in visible_ids or name not in plotted_names:
             continue
         offset=auto_offsets[name]+offset_step*plot_names.index(name)+style[name]["offset"]
+        fit_style=fit.get("style",{})
         ax.plot(fit["x_fit"],np.asarray(fit["y_fit"],dtype=float)+offset,
-                linestyle="--",linewidth=2,color=style[name]["color"],
+                linestyle=fit_style.get("linestyle","--"),
+                linewidth=float(fit_style.get("linewidth",2.0)),
+                color=fit_style.get("color",style[name]["color"]),
                 label=f"Fit · {name} · {fit['model']}")
 
 def compute_average_curve(target_names, series, values_by_name, axis_label):
@@ -1470,6 +1473,25 @@ with tabs[0]:
             names=[s["name"] for s in series]
             signal_selected=[n for n in selected if n not in error_source_names]
             plot_selected=signal_selected
+            fit_results=st.session_state.get("fit_results",[])
+            if fit_results:
+                with st.expander("피팅 곡선 스타일",expanded=False):
+                    st.caption("각 피팅 결과의 색상, 선 종류, 선 굵기를 따로 설정합니다. 미리보기와 PNG 저장 그래프에 함께 적용됩니다.")
+                    line_styles={"실선":"-","파선":"--","점선":":","일점쇄선":"-."}
+                    reverse_line_styles={value:key for key,value in line_styles.items()}
+                    for fit_index,fit in enumerate(fit_results):
+                        fit_color_default=style.get(fit.get("curve_name"),{}).get("color","#d62728")
+                        saved_fit_style=fit.get("style",{})
+                        color_col,line_col,width_col=st.columns([1,1,1])
+                        color=color_col.color_picker(f"{fit['curve_name']} 색상",value=saved_fit_style.get("color",fit_color_default),
+                                                     key=f"fit_style_color_{abs(hash(fit['id']))}")
+                        line_label=line_col.selectbox(f"{fit['curve_name']} 선 종류",list(line_styles),
+                                                      index=list(line_styles).index(reverse_line_styles.get(saved_fit_style.get("linestyle","--"),"파선")),
+                                                      key=f"fit_style_line_{abs(hash(fit['id']))}")
+                        line_width=width_col.number_input(f"{fit['curve_name']} 굵기",min_value=0.5,max_value=6.0,
+                                                          value=float(saved_fit_style.get("linewidth",2.0)),step=0.1,
+                                                          key=f"fit_style_width_{abs(hash(fit['id']))}")
+                        fit["style"]={"color":color,"linestyle":line_styles[line_label],"linewidth":line_width}
             overlay_fit_results=[fit for fit in st.session_state.get("fit_results",[])
                                  if fit.get("id") in visible_fit_ids and fit.get("curve_name") in plot_selected]
 
@@ -2014,11 +2036,15 @@ with tabs[3]:
                 for i,(param_name,param_value) in enumerate(param_rows):
                     standard_error=(float(param_errors[i]) if param_errors is not None and i<len(param_errors) else np.nan)
                     parameter_records.append({"Parameter":param_name,"Estimate":param_value,"Std. error":standard_error})
+                prior_fit=next((fit for fit in st.session_state.get("fit_results",[]) if fit.get("id")==fit_id),None)
+                default_fit_style={"color":style.get(fit_target,{}).get("color","#d62728"),
+                                   "linestyle":"--","linewidth":2.0}
                 new_fit={"id":fit_id,"curve_name":fit_target,"purpose":fit_purpose,"model":fit_model_name,
                          "x_fit":dense_x,"y_fit":np.asarray(dense_y,dtype=float),
                          "parameters":parameter_records,"r_squared":r_squared,"rmse":rmse,
                          "n_points":int(len(x_fit_data)),"weighted":bool(use_weights),
-                         "x_min":float(min(fit_x_min,fit_x_max)),"x_max":float(max(fit_x_min,fit_x_max))}
+                         "x_min":float(min(fit_x_min,fit_x_max)),"x_max":float(max(fit_x_min,fit_x_max)),
+                         "style":prior_fit.get("style",default_fit_style) if prior_fit else default_fit_style}
                 current=[fit for fit in st.session_state.get("fit_results",[]) if fit.get("id")!=fit_id]
                 st.session_state["fit_results"]=[*current,new_fit]
                 st.session_state["_pending_fit_overlay_id"]=fit_id
