@@ -1293,14 +1293,18 @@ style={}
 with tabs[0]:
     plot_col,settings_col=st.columns([2.2,1],gap="large")
     st.markdown("""<style>
-    div[data-testid="column"]:has(#graph-settings-scroll-anchor) {
-        height: calc(100vh - 1.5rem);
-        max-height: calc(100vh - 1.5rem);
-        overflow-y: auto;
-        overflow-x: hidden;
-        overscroll-behavior: contain;
+    div[data-testid="stHorizontalBlock"]:has(#graph-settings-scroll-anchor) > div[data-testid="column"]:nth-child(2) {
+        position: sticky !important;
+        top: 0.5rem !important;
+        align-self: flex-start !important;
+        box-sizing: border-box !important;
+        height: calc(100vh - 1rem) !important;
+        max-height: calc(100vh - 1rem) !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        overscroll-behavior: contain !important;
         scrollbar-gutter: stable;
-        padding-right: 0.4rem;
+        padding-right: 0.4rem !important;
     }
     </style>""",unsafe_allow_html=True)
     with settings_col:
