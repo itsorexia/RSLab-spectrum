@@ -159,18 +159,20 @@ def parse_upload(upload):
                     if match:
                         common_errors[match.group(1).strip()]=column_index
                 common_series=[]
-                for column_index,cell in enumerate(header_cells[1:],1):
-                    curve_name=str(cell).strip()
-                    if curve_name in common_errors or re.search(r"\s\|\sError$",curve_name,re.IGNORECASE):
-                        continue
+                common_y_columns=[(column_index,str(cell).strip())
+                                  for column_index,cell in enumerate(header_cells[1:],1)
+                                  if not re.search(r"\s\|\sError$",str(cell).strip(),re.IGNORECASE)]
+                for column_index,source_column_name in common_y_columns:
+                    curve_name=(file_stem if len(common_y_columns)==1
+                                else f"{file_stem} · {source_column_name}")
                     y_values=pd.to_numeric(common_df.iloc[:,column_index],errors="coerce")
                     valid=x_values.notna() & y_values.notna()
                     if valid.sum()<2:
                         continue
                     item={"name":curve_name,"x":x_values[valid].to_numpy(float),"raw":y_values[valid].to_numpy(float),
                           "x_label":axis_label,"y_label":"Intensity"}
-                    if curve_name in common_errors:
-                        error_values=pd.to_numeric(common_df.iloc[:,common_errors[curve_name]],errors="coerce")
+                    if source_column_name in common_errors:
+                        error_values=pd.to_numeric(common_df.iloc[:,common_errors[source_column_name]],errors="coerce")
                         item["error"]=np.abs(error_values[valid].to_numpy(float))
                     common_series.append(item)
                 if common_series:
@@ -198,16 +200,18 @@ def parse_upload(upload):
             if paired_names:
                 paired_df=pd.read_csv(io.StringIO(text),sep=paired_sep,comment="#",on_bad_lines="skip")
                 paired_series=[]
-                for curve_name in paired_names:
-                    x=pd.to_numeric(paired_df.iloc[:,paired_x[curve_name]],errors="coerce")
-                    y=pd.to_numeric(paired_df.iloc[:,paired_y[curve_name]],errors="coerce")
+                for source_curve_name in paired_names:
+                    curve_name=(file_stem if len(paired_names)==1
+                                else f"{file_stem} · {source_curve_name}")
+                    x=pd.to_numeric(paired_df.iloc[:,paired_x[source_curve_name]],errors="coerce")
+                    y=pd.to_numeric(paired_df.iloc[:,paired_y[source_curve_name]],errors="coerce")
                     valid=x.notna() & y.notna()
                     if valid.sum()<2:
                         continue
                     item={"name":curve_name,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
-                          "x_label":paired_axis_labels.get(curve_name,"X"),"y_label":"Intensity"}
-                    if curve_name in paired_error:
-                        error=pd.to_numeric(paired_df.iloc[:,paired_error[curve_name]],errors="coerce")
+                          "x_label":paired_axis_labels.get(source_curve_name,"X"),"y_label":"Intensity"}
+                    if source_curve_name in paired_error:
+                        error=pd.to_numeric(paired_df.iloc[:,paired_error[source_curve_name]],errors="coerce")
                         item["error"]=np.abs(error[valid].to_numpy(float))
                     paired_series.append(item)
                 if paired_series:
@@ -548,7 +552,7 @@ def extend_ylim_for_fit(limits, fits, visible_ids, plotted_names, plot_names, au
             continue
         xx=np.asarray(fit["x_fit"],dtype=float)
         yy=np.asarray(fit["y_fit"],dtype=float)
-        offset=auto_offsets[name]+offset_step*plot_names.index(name)+style[name]["offset"]
+        offset=auto_offsets[name]+offset_step*plotted_names.index(name)+style[name]["offset"]
         mask=np.isfinite(xx)&np.isfinite(yy)&(xx>=x_min)&(xx<=x_max)
         if log_scale: mask &= (yy+offset)>0
         if np.any(mask): values.extend((yy[mask]+offset).tolist())
@@ -571,7 +575,7 @@ def draw_fit_overlays(ax, fits, visible_ids, plotted_names, plot_names, auto_off
         name=fit.get("curve_name")
         if fit.get("id") not in visible_ids or name not in plotted_names:
             continue
-        offset=auto_offsets[name]+offset_step*plot_names.index(name)+style[name]["offset"]
+        offset=auto_offsets[name]+offset_step*plotted_names.index(name)+style[name]["offset"]
         fit_style=fit.get("style",{})
         ax.plot(fit["x_fit"],np.asarray(fit["y_fit"],dtype=float)+offset,
                 linestyle=fit_style.get("linestyle","--"),
@@ -747,7 +751,7 @@ def visible_stack_ylim(series, processed, names, plotted_names, auto_offsets, of
         mask=(np.isfinite(item["x"]) & np.isfinite(y_values) &
               (item["x"]>=x_min) & (item["x"]<=x_max))
         if np.any(mask):
-            offset=auto_offsets[name]+offset_step*names.index(name)+style[name]["offset"]
+            offset=auto_offsets[name]+offset_step*plotted_names.index(name)+style[name]["offset"]
             limits.extend((y_values[mask]+offset).tolist())
     if not limits:
         return None
@@ -765,7 +769,7 @@ def visible_stack_log_ylim(series, processed, names, plotted_names, auto_offsets
         item=by_name[name]
         x_values=np.asarray(item["x"],dtype=float)
         y_values=np.asarray(processed[name],dtype=float)
-        offset=auto_offsets[name]+offset_step*names.index(name)+style[name]["offset"]
+        offset=auto_offsets[name]+offset_step*plotted_names.index(name)+style[name]["offset"]
         plotted=y_values+offset
         mask=(np.isfinite(x_values)&np.isfinite(plotted)&(x_values>=x_min)&(x_values<=x_max)&(plotted>0))
         values.extend(plotted[mask].tolist())
@@ -1108,7 +1112,11 @@ with st.sidebar:
         loaded=[]; errors=[]
         previous_names=[s["name"] for s in st.session_state.series]
         for f in uploads or []:
-            try: loaded.extend(parse_upload(f))
+            try:
+                parsed_curves=parse_upload(f)
+                for item in parsed_curves:
+                    item["source_file"]=f.name
+                loaded.extend(parsed_curves)
             except Exception as e: errors.append(f"{f.name}: {e}")
         loaded=make_series_names_unique(loaded,[s["name"] for s in st.session_state.series])
         st.session_state.series.extend(loaded)
@@ -1747,16 +1755,18 @@ with tabs[0]:
             # Base the automatic vertical stack spacing on the visible X range.
             # This keeps the gaps proportional when the user zooms into a narrower range.
             x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
+            visible_plot_names=[n for n in plot_names if n in plot_selected]
             heights=[]
-            for n in plot_names:
+            for n in visible_plot_names:
                 s=next(z for z in series if z["name"]==n)
                 y_values=np.asarray(proc[n],dtype=float)
                 visible=np.isfinite(s["x"]) & np.isfinite(y_values) & (s["x"]>=x_range_min) & (s["x"]<=x_range_max)
                 values=y_values[visible] if np.any(visible) else y_values[np.isfinite(y_values)]
                 peak=float(np.nanmax(values)) if values.size else 0.0
                 heights.append(max(peak*1.10,0.01))
-            auto={}
-            for i,n in enumerate(plot_names): auto[n]=sum(heights[i+1:]) if stack else 0
+            auto={n:0 for n in plot_names}
+            for i,n in enumerate(visible_plot_names):
+                auto[n]=sum(heights[i+1:]) if stack else 0
             # Draw the preview with the same Matplotlib renderer and settings as the PNG export.
             # The HTML layer only adds pointer crosshairs over the rendered image, so font
             # metrics, tick styling, labels, margins, and line placement remain unchanged.
@@ -1767,7 +1777,7 @@ with tabs[0]:
             for n in names:
                 if n in plot_selected:
                     s=next(z for z in series if z["name"]==n)
-                    off=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
+                    off=auto[n]+offset_step*visible_plot_names.index(n)+style[n]["offset"]
                     curve_x=np.asarray(s["x"],dtype=float)
                     curve_y=np.asarray(proc[n],dtype=float)+off
                     error_values=processed_error(s,opts)
@@ -1781,15 +1791,15 @@ with tabs[0]:
                     hover_curves.append({"name":n,"x":curve_x[valid_indices][order].tolist(),
                                          "y":curve_y[valid_indices][order].tolist()})
             if show_fit_overlay:
-                draw_fit_overlays(preview_ax,overlay_fit_results,visible_fit_ids,plot_selected,plot_names,auto,offset_step,style)
+                draw_fit_overlays(preview_ax,overlay_fit_results,visible_fit_ids,visible_plot_names,plot_names,auto,offset_step,style)
             if x_log: preview_ax.set_xscale("log")
             if y_log: preview_ax.set_yscale("log")
             preview_ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
             if y_auto:
-                visible_limits=(visible_stack_log_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax)
-                                if y_log else visible_stack_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax))
+                visible_limits=(visible_stack_log_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,xmin,xmax)
+                                if y_log else visible_stack_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,xmin,xmax))
                 visible_limits=extend_ylim_for_fit(visible_limits,overlay_fit_results,visible_fit_ids,
-                                                   plot_selected,plot_names,auto,offset_step,style,
+                                                   visible_plot_names,plot_names,auto,offset_step,style,
                                                    xmin,xmax,y_log)
                 if visible_limits:
                     preview_ax.set_ylim(*visible_limits)
@@ -1932,12 +1942,21 @@ with tabs[1]:
         average_ax.legend()
         st.pyplot(average_fig,use_container_width=True)
         plt.close(average_fig)
-        average_table=pd.DataFrame({"X":average_curve["x"],average_curve["name"]:average_curve["y"]})
+        curve_lookup={s["name"]:s for s in series}
+        source_stems=[]
+        for curve_name in average_targets:
+            source_file=curve_lookup.get(curve_name,{}).get("source_file")
+            source_stems.append(Path(source_file).stem if source_file
+                                 else str(curve_name).split(" · ",1)[0])
+        source_stems=list(dict.fromkeys(source_stems))
+        average_export_name=(source_stems[0] if len(source_stems)==1 else "_and_".join(source_stems))
+        average_export_name=re.sub(r'[\\/:*?"<>|]+',"_",average_export_name).strip(" ._") or "average_curve"
+        average_table=pd.DataFrame({"X":average_curve["x"],average_export_name:average_curve["y"]})
         avg_csv_col,avg_txt_col=st.columns(2)
         avg_csv_col.download_button("평균 곡선 CSV",average_table.to_csv(index=False).encode("utf-8-sig"),
-                                    "average_spectrum.csv","text/csv",key="average_curve_csv",use_container_width=True)
+                                        f"{average_export_name}.csv","text/csv",key="average_curve_csv",use_container_width=True)
         avg_txt_col.download_button("평균 곡선 TXT",average_table.to_csv(index=False,sep="\t").encode("utf-8-sig"),
-                                    "average_spectrum.txt","text/plain",key="average_curve_txt",use_container_width=True)
+                                        f"{average_export_name}.txt","text/plain",key="average_curve_txt",use_container_width=True)
         st.caption(f"평균 포함 곡선 {average_curve['count']}개 · 공통 X 범위 {average_curve['x'][0]:g}–{average_curve['x'][-1]:g}")
 
 with tabs[2]:
@@ -1961,10 +1980,10 @@ with tabs[2]:
             peak_plot_names=[n for n in plot_names if n in plot_selected]
             if target not in peak_plot_names and target in plot_names:
                 peak_plot_names.append(target)
-            peak_target_offset=auto[target]+offset_step*plot_names.index(target)+style[target]["offset"]
+            peak_target_offset=auto[target]+offset_step*peak_plot_names.index(target)+style[target]["offset"]
             for n in peak_plot_names:
                 peak_s=next(z for z in series if z["name"]==n)
-                peak_offset=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
+                peak_offset=auto[n]+offset_step*peak_plot_names.index(n)+style[n]["offset"]
                 error_values=processed_error(peak_s,opts)
                 draw_curve(ax2,peak_s,proc[n]+peak_offset,n,style[n]["color"],style[n]["linewidth"],
                            plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
@@ -2179,20 +2198,20 @@ with tabs[4]:
     for n in names:
         if n in plot_selected:
             s=next(z for z in series if z["name"]==n)
-            off=auto[n]+offset_step*plot_names.index(n)+style[n]["offset"]
+            off=auto[n]+offset_step*visible_plot_names.index(n)+style[n]["offset"]
             error_values=processed_error(s,opts)
             draw_curve(axout,s,proc[n]+off,n,style[n]["color"],style[n]["linewidth"],
                        plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
     if show_fit_overlay:
-        draw_fit_overlays(axout,overlay_fit_results,visible_fit_ids,plot_selected,plot_names,auto,offset_step,style)
+        draw_fit_overlays(axout,overlay_fit_results,visible_fit_ids,visible_plot_names,plot_names,auto,offset_step,style)
     if x_log: axout.set_xscale("log")
     if y_log: axout.set_yscale("log")
     axout.set_xlim(min(xmin,xmax),max(xmin,xmax))
     if y_auto:
-        visible_limits=(visible_stack_log_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax)
-                       if y_log else visible_stack_ylim(series,proc,plot_names,plot_selected,auto,offset_step,style,xmin,xmax))
+        visible_limits=(visible_stack_log_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,xmin,xmax)
+                       if y_log else visible_stack_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,xmin,xmax))
         visible_limits=extend_ylim_for_fit(visible_limits,overlay_fit_results,visible_fit_ids,
-                                           plot_selected,plot_names,auto,offset_step,style,
+                                           visible_plot_names,plot_names,auto,offset_step,style,
                                            xmin,xmax,y_log)
         if visible_limits:
             ylo,yhi=visible_limits
