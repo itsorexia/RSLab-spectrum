@@ -538,8 +538,19 @@ def fit_curve_model(x, y, purpose, model, sigma=None):
 
     raise ValueError(f"지원하지 않는 피팅 모델입니다: {model}")
 
+def stacked_curve_y(values, name, plotted_names, auto_offsets, offset_step, style,
+                    log_stack=False, log_lifts=None):
+    """Apply additive offsets for linear stacks or multiplicative offsets for log stacks."""
+    values=np.asarray(values,dtype=float)
+    offset=auto_offsets[name]+offset_step*plotted_names.index(name)+style[name]["offset"]
+    if log_stack:
+        lift=(log_lifts or {}).get(name,0.0)
+        return (values+lift)*np.power(10.0,offset)
+    return values+offset
+
 def extend_ylim_for_fit(limits, fits, visible_ids, plotted_names, plot_names, auto_offsets,
-                        offset_step, style, x_min, x_max, log_scale=False):
+                        offset_step, style, x_min, x_max, log_scale=False,
+                        log_lifts=None, log_stack=False):
     """Expand automatic graph limits to include visible fit curves."""
     if limits is None:
         return None
@@ -551,10 +562,10 @@ def extend_ylim_for_fit(limits, fits, visible_ids, plotted_names, plot_names, au
             continue
         xx=np.asarray(fit["x_fit"],dtype=float)
         yy=np.asarray(fit["y_fit"],dtype=float)
-        offset=auto_offsets[name]+offset_step*plotted_names.index(name)+style[name]["offset"]
         mask=np.isfinite(xx)&np.isfinite(yy)&(xx>=x_min)&(xx<=x_max)
-        if log_scale: mask &= (yy+offset)>0
-        if np.any(mask): values.extend((yy[mask]+offset).tolist())
+        plotted_y=stacked_curve_y(yy,name,plotted_names,auto_offsets,offset_step,style,log_stack,log_lifts)
+        if log_scale: mask &= plotted_y>0
+        if np.any(mask): values.extend(plotted_y[mask].tolist())
     if not values:
         return limits
     low=min(float(limits[0]),float(np.min(values)))
@@ -569,14 +580,15 @@ def extend_ylim_for_fit(limits, fits, visible_ids, plotted_names, plot_names, au
     return low-padding,high+padding
 
 def draw_fit_overlays(ax, fits, visible_ids, plotted_names, plot_names, auto_offsets,
-                      offset_step, style):
+                      offset_step, style, log_stack=False, log_lifts=None):
     for fit in fits:
         name=fit.get("curve_name")
         if fit.get("id") not in visible_ids or name not in plotted_names:
             continue
-        offset=auto_offsets[name]+offset_step*plotted_names.index(name)+style[name]["offset"]
         fit_style=fit.get("style",{})
-        ax.plot(fit["x_fit"],np.asarray(fit["y_fit"],dtype=float)+offset,
+        fit_y=stacked_curve_y(fit["y_fit"],name,plotted_names,auto_offsets,offset_step,
+                              style,log_stack,log_lifts)
+        ax.plot(fit["x_fit"],fit_y,
                 linestyle=fit_style.get("linestyle","--"),
                 linewidth=float(fit_style.get("linewidth",2.0)),
                 color=fit_style.get("color",style[name]["color"]),
@@ -759,7 +771,8 @@ def visible_stack_ylim(series, processed, names, plotted_names, auto_offsets, of
     padding=0.05*span if span>0 else max(abs(high)*0.05,0.01)
     return low-padding,high+padding
 
-def visible_stack_log_ylim(series, processed, names, plotted_names, auto_offsets, offset_step, style, x_min, x_max):
+def visible_stack_log_ylim(series, processed, names, plotted_names, auto_offsets, offset_step,
+                           style, x_min, x_max, log_lifts=None, log_stack=False):
     """Return positive, multiplicatively padded Y limits for a log axis."""
     values=[]
     by_name={item["name"]:item for item in series}
@@ -768,8 +781,8 @@ def visible_stack_log_ylim(series, processed, names, plotted_names, auto_offsets
         item=by_name[name]
         x_values=np.asarray(item["x"],dtype=float)
         y_values=np.asarray(processed[name],dtype=float)
-        offset=auto_offsets[name]+offset_step*plotted_names.index(name)+style[name]["offset"]
-        plotted=y_values+offset
+        plotted=stacked_curve_y(y_values,name,plotted_names,auto_offsets,offset_step,
+                                style,log_stack,log_lifts)
         mask=(np.isfinite(x_values)&np.isfinite(plotted)&(x_values>=x_min)&(x_values<=x_max)&(plotted>0))
         values.extend(plotted[mask].tolist())
     if not values:
@@ -1383,12 +1396,18 @@ with tabs[0]:
             with stack_tab:
                 selected=st.session_state.get("graph_selected",names.copy())
                 stack=st.checkbox("수직 스택 사용",False,key="graph_stack")
-                offset_step=st.number_input("곡선 간 추가 간격",value=0.0,key="graph_stack_step")
-                st.caption("현재 X축 범위 안의 최대 intensity에 10%를 더해 자동 간격을 계산합니다. 첫 번째 곡선이 위쪽에 배치됩니다.")
+                log_stack_ui=bool(st.session_state.get("graph_y_log",False)) and stack
+                offset_label="곡선 간 추가 간격 (log₁₀ 단위)" if log_stack_ui else "곡선 간 추가 간격"
+                offset_step=st.number_input(offset_label,value=0.0,key="graph_stack_step")
+                if log_stack_ui:
+                    st.caption("로그 스케일 수직 스택은 곡선을 양수로 보정한 뒤 log₁₀ 단위로 쌓습니다. 첫 번째 곡선이 위쪽에 배치됩니다.")
+                else:
+                    st.caption("현재 X축 범위 안의 최대 intensity에 10%를 더해 자동 간격을 계산합니다. 첫 번째 곡선이 위쪽에 배치됩니다.")
                 with st.expander("곡선별 오프셋",expanded=False):
-                    st.caption("각 곡선의 세로 위치를 개별 조정합니다.")
+                    st.caption("각 곡선의 세로 위치를 개별 조정합니다."+(" 로그 스택에서는 log₁₀ 단위입니다." if log_stack_ui else ""))
                     for i,s in enumerate(series):
-                        s["offset"]=st.number_input(f"{s['name']} 오프셋",value=float(s.get("offset",0)),key=f"off_{i}")
+                        offset_name=f"{s['name']} 오프셋 (log₁₀ 단위)" if log_stack_ui else f"{s['name']} 오프셋"
+                        s["offset"]=st.number_input(offset_name,value=float(s.get("offset",0)),key=f"off_{i}")
             with visual_tab:
                 if st.session_state.get("graph_plot_style")=="에러바":
                     st.session_state["graph_plot_style"]="산점도"
@@ -1755,6 +1774,7 @@ with tabs[0]:
             # This keeps the gaps proportional when the user zooms into a narrower range.
             x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
             visible_plot_names=[n for n in plot_names if n in plot_selected]
+            log_stack=bool(stack and y_log)
             heights=[]
             log_stack_lifts={}
             for n in visible_plot_names:
@@ -1764,23 +1784,22 @@ with tabs[0]:
                 values=y_values[visible] if np.any(visible) else y_values[np.isfinite(y_values)]
                 finite_values=values[np.isfinite(values)]
                 peak=float(np.max(finite_values)) if finite_values.size else 0.0
-                if stack and y_log and finite_values.size:
+                if log_stack and finite_values.size:
                     low=float(np.min(finite_values))
-                    positive_floor=max(1e-12,max(abs(low),abs(peak),1.0)*1e-9)
+                    positive_floor=max(np.finfo(float).tiny,max(abs(low),abs(peak),np.finfo(float).tiny)*1e-6)
                     log_stack_lifts[n]=max(0.0,positive_floor-low)
-                    heights.append(max((peak+log_stack_lifts[n])*1.10,positive_floor*1.10))
+                    shifted_values=finite_values+log_stack_lifts[n]
+                    shifted_values=shifted_values[shifted_values>0]
+                    log_span=(float(np.log10(np.max(shifted_values))-np.log10(np.min(shifted_values)))
+                              if shifted_values.size else 0.0)
+                    heights.append(max(log_span+0.12,0.12))
                 else:
                     log_stack_lifts[n]=0.0
                     heights.append(max(peak*1.10,0.01))
             auto={n:0 for n in plot_names}
             for i,n in enumerate(visible_plot_names):
                 if stack:
-                    minimum_log_offset=log_stack_lifts[n]
-                    automatic_offset=sum(heights[i+1:])+minimum_log_offset
-                    user_offset=offset_step*i+style[n]["offset"]
-                    # A log axis cannot render values at or below zero. Keep every
-                    # stacked trace positive even when its data or manual offset is negative.
-                    auto[n]=max(automatic_offset,minimum_log_offset-user_offset) if y_log else automatic_offset
+                    auto[n]=sum(heights[i+1:])
                 else:
                     auto[n]=0
             # Draw the preview with the same Matplotlib renderer and settings as the PNG export.
@@ -1793,9 +1812,9 @@ with tabs[0]:
             for n in names:
                 if n in plot_selected:
                     s=next(z for z in series if z["name"]==n)
-                    off=auto[n]+offset_step*visible_plot_names.index(n)+style[n]["offset"]
                     curve_x=np.asarray(s["x"],dtype=float)
-                    curve_y=np.asarray(proc[n],dtype=float)+off
+                    curve_y=stacked_curve_y(proc[n],n,visible_plot_names,auto,offset_step,style,
+                                            log_stack,log_stack_lifts)
                     error_values=processed_error(s,opts)
                     draw_curve(preview_ax,s,curve_y,n,style[n]["color"],style[n]["linewidth"],
                                plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
@@ -1807,16 +1826,18 @@ with tabs[0]:
                     hover_curves.append({"name":n,"x":curve_x[valid_indices][order].tolist(),
                                          "y":curve_y[valid_indices][order].tolist()})
             if show_fit_overlay:
-                draw_fit_overlays(preview_ax,overlay_fit_results,visible_fit_ids,visible_plot_names,plot_names,auto,offset_step,style)
+                draw_fit_overlays(preview_ax,overlay_fit_results,visible_fit_ids,visible_plot_names,
+                                  plot_names,auto,offset_step,style,log_stack,log_stack_lifts)
             if x_log: preview_ax.set_xscale("log")
             if y_log: preview_ax.set_yscale("log")
             preview_ax.set_xlim(min(xmin,xmax),max(xmin,xmax))
             if y_auto:
-                visible_limits=(visible_stack_log_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,xmin,xmax)
+                visible_limits=(visible_stack_log_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,
+                                                       xmin,xmax,log_stack_lifts,log_stack)
                                 if y_log else visible_stack_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,xmin,xmax))
                 visible_limits=extend_ylim_for_fit(visible_limits,overlay_fit_results,visible_fit_ids,
                                                    visible_plot_names,plot_names,auto,offset_step,style,
-                                                   xmin,xmax,y_log)
+                                                   xmin,xmax,y_log,log_stack_lifts,log_stack)
                 if visible_limits:
                     preview_ax.set_ylim(*visible_limits)
             else:
@@ -1996,19 +2017,30 @@ with tabs[2]:
             peak_plot_names=[n for n in plot_names if n in plot_selected]
             if target not in peak_plot_names and target in plot_names:
                 peak_plot_names.append(target)
-            peak_target_offset=auto[target]+offset_step*peak_plot_names.index(target)+style[target]["offset"]
+            peak_log_lifts=dict(log_stack_lifts)
+            if log_stack and target not in log_stack_lifts:
+                target_values=np.asarray(y,dtype=float)
+                target_values=target_values[np.isfinite(target_values)]
+                if target_values.size:
+                    target_low=float(np.min(target_values)); target_high=float(np.max(target_values))
+                    target_floor=max(np.finfo(float).tiny,max(abs(target_low),abs(target_high),np.finfo(float).tiny)*1e-6)
+                    peak_log_lifts[target]=max(0.0,target_floor-target_low)
+            peak_target_y=stacked_curve_y(y,target,peak_plot_names,auto,offset_step,style,
+                                          log_stack,peak_log_lifts)
             for n in peak_plot_names:
                 peak_s=next(z for z in series if z["name"]==n)
-                peak_offset=auto[n]+offset_step*peak_plot_names.index(n)+style[n]["offset"]
+                peak_y=stacked_curve_y(proc[n],n,peak_plot_names,auto,offset_step,style,
+                                       log_stack,peak_log_lifts)
                 error_values=processed_error(peak_s,opts)
-                draw_curve(ax2,peak_s,proc[n]+peak_offset,n,style[n]["color"],style[n]["linewidth"],
+                draw_curve(ax2,peak_s,peak_y,n,style[n]["color"],style[n]["linewidth"],
                            plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
-            ax2.scatter(s["x"][peaks],y[peaks]+peak_target_offset,color="red",zorder=5)
+            ax2.scatter(s["x"][peaks],peak_target_y[peaks],color="red",zorder=5)
             if x_log: ax2.set_xscale("log")
             if y_log: ax2.set_yscale("log")
             ax2.set_xlim(min(xmin,xmax),max(xmin,xmax))
             if y_auto:
-                visible_limits=(visible_stack_log_ylim(series,proc,plot_names,peak_plot_names,auto,offset_step,style,xmin,xmax)
+                visible_limits=(visible_stack_log_ylim(series,proc,plot_names,peak_plot_names,auto,offset_step,style,
+                                                       xmin,xmax,peak_log_lifts,log_stack)
                                if y_log else visible_stack_ylim(series,proc,plot_names,peak_plot_names,auto,offset_step,style,xmin,xmax))
                 if visible_limits: ax2.set_ylim(*visible_limits)
             else: ax2.set_ylim(min(ymin,ymax),max(ymin,ymax))
@@ -2214,21 +2246,24 @@ with tabs[4]:
     for n in names:
         if n in plot_selected:
             s=next(z for z in series if z["name"]==n)
-            off=auto[n]+offset_step*visible_plot_names.index(n)+style[n]["offset"]
+            plotted_y=stacked_curve_y(proc[n],n,visible_plot_names,auto,offset_step,style,
+                                      log_stack,log_stack_lifts)
             error_values=processed_error(s,opts)
-            draw_curve(axout,s,proc[n]+off,n,style[n]["color"],style[n]["linewidth"],
+            draw_curve(axout,s,plotted_y,n,style[n]["color"],style[n]["linewidth"],
                        plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
     if show_fit_overlay:
-        draw_fit_overlays(axout,overlay_fit_results,visible_fit_ids,visible_plot_names,plot_names,auto,offset_step,style)
+        draw_fit_overlays(axout,overlay_fit_results,visible_fit_ids,visible_plot_names,
+                          plot_names,auto,offset_step,style,log_stack,log_stack_lifts)
     if x_log: axout.set_xscale("log")
     if y_log: axout.set_yscale("log")
     axout.set_xlim(min(xmin,xmax),max(xmin,xmax))
     if y_auto:
-        visible_limits=(visible_stack_log_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,xmin,xmax)
+        visible_limits=(visible_stack_log_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,
+                                               xmin,xmax,log_stack_lifts,log_stack)
                        if y_log else visible_stack_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,xmin,xmax))
         visible_limits=extend_ylim_for_fit(visible_limits,overlay_fit_results,visible_fit_ids,
                                            visible_plot_names,plot_names,auto,offset_step,style,
-                                           xmin,xmax,y_log)
+                                           xmin,xmax,y_log,log_stack_lifts,log_stack)
         if visible_limits:
             ylo,yhi=visible_limits
             axout.set_ylim(ylo,yhi)
