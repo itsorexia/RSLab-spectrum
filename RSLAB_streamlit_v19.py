@@ -1330,6 +1330,14 @@ with st.sidebar:
     for spec in regular_specs:
         source=spec.get("source_file") or "직접 입력 / 기타 데이터"
         regular_source_groups.setdefault(source,[]).append(spec)
+    if st.button("전체 그리기",key="select_all_graph_curves",use_container_width=True):
+        for source,group_specs in regular_source_groups.items():
+            st.session_state[f"regular_curve_selection::{source}"]=[s["name"] for s in group_specs]
+        for source,group_specs in mapped_source_groups.items():
+            st.session_state[f"mapped_curve_selection::{source}"]=[
+                s["name"] for s in group_specs if s["name"] not in error_source_names
+            ]
+        st.session_state["graph_selected_regular"]=[s["name"] for s in regular_specs]
     prior_regular=st.session_state.get("graph_selected_regular")
     if prior_regular is None:
         prior_regular=st.session_state.get("graph_selected",names)
