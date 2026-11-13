@@ -1,4 +1,3 @@
-
 """Streamlit port of the RSLAB spectrum 👨🏻‍🔬👩🏻‍🔬 (core workflow)."""
 from __future__ import annotations
 import ast, io, json, csv, re, zipfile, base64
@@ -1740,12 +1739,12 @@ with tabs[0]:
             if x_log and xmin<=0:
                 st.error("X축 로그 스케일에서는 X 최소값이 0보다 커야 합니다.")
                 xmin=data_xmin
-            if y_log and (ymin<=0 or ymax<=0):
+            if y_log and not y_auto and (ymin<=0 or ymax<=0):
                 st.error("Y축 로그 스케일에서는 Y축 범위가 모두 0보다 커야 합니다.")
                 ymin,ymax=(float(np.min(positive_y)),float(np.max(positive_y))) if positive_y.size>1 else (1.0,10.0)
             if x_log and not positive_x.size:
                 st.error("X축 로그 스케일에 사용할 양수 데이터가 없습니다.")
-            if y_log and not positive_y.size:
+            if y_log and not positive_y.size and not stack:
                 st.error("Y축 로그 스케일에 사용할 양수 데이터가 없습니다.")
     with plot_col:
         with st.container(height=650,border=False):
@@ -1757,16 +1756,33 @@ with tabs[0]:
             x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
             visible_plot_names=[n for n in plot_names if n in plot_selected]
             heights=[]
+            log_stack_lifts={}
             for n in visible_plot_names:
                 s=next(z for z in series if z["name"]==n)
                 y_values=np.asarray(proc[n],dtype=float)
                 visible=np.isfinite(s["x"]) & np.isfinite(y_values) & (s["x"]>=x_range_min) & (s["x"]<=x_range_max)
                 values=y_values[visible] if np.any(visible) else y_values[np.isfinite(y_values)]
-                peak=float(np.nanmax(values)) if values.size else 0.0
-                heights.append(max(peak*1.10,0.01))
+                finite_values=values[np.isfinite(values)]
+                peak=float(np.max(finite_values)) if finite_values.size else 0.0
+                if stack and y_log and finite_values.size:
+                    low=float(np.min(finite_values))
+                    positive_floor=max(1e-12,max(abs(low),abs(peak),1.0)*1e-9)
+                    log_stack_lifts[n]=max(0.0,positive_floor-low)
+                    heights.append(max((peak+log_stack_lifts[n])*1.10,positive_floor*1.10))
+                else:
+                    log_stack_lifts[n]=0.0
+                    heights.append(max(peak*1.10,0.01))
             auto={n:0 for n in plot_names}
             for i,n in enumerate(visible_plot_names):
-                auto[n]=sum(heights[i+1:]) if stack else 0
+                if stack:
+                    minimum_log_offset=log_stack_lifts[n]
+                    automatic_offset=sum(heights[i+1:])+minimum_log_offset
+                    user_offset=offset_step*i+style[n]["offset"]
+                    # A log axis cannot render values at or below zero. Keep every
+                    # stacked trace positive even when its data or manual offset is negative.
+                    auto[n]=max(automatic_offset,minimum_log_offset-user_offset) if y_log else automatic_offset
+                else:
+                    auto[n]=0
             # Draw the preview with the same Matplotlib renderer and settings as the PNG export.
             # The HTML layer only adds pointer crosshairs over the rendered image, so font
             # metrics, tick styling, labels, margins, and line placement remain unchanged.
@@ -2287,6 +2303,3 @@ with tabs[5]:
     st.subheader("빈 스프레드시트")
     st.caption("새 데이터도 아래 표에 입력한 뒤 그래프에 추가할 수 있습니다.")
     render_blank_spectrum("blank_tab")
-
-
-
