@@ -169,6 +169,7 @@ def parse_upload(upload):
                     if valid.sum()<2:
                         continue
                     item={"name":curve_name,"x":x_values[valid].to_numpy(float),"raw":y_values[valid].to_numpy(float),
+                          "source_file":upload.name,
                           "x_label":axis_label,"y_label":"Intensity"}
                     if source_column_name in common_errors:
                         error_values=pd.to_numeric(common_df.iloc[:,common_errors[source_column_name]],errors="coerce")
@@ -208,6 +209,7 @@ def parse_upload(upload):
                     if valid.sum()<2:
                         continue
                     item={"name":curve_name,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
+                          "source_file":upload.name,
                           "x_label":paired_axis_labels.get(source_curve_name,"X"),"y_label":"Intensity"}
                     if source_curve_name in paired_error:
                         error=pd.to_numeric(paired_df.iloc[:,paired_error[source_curve_name]],errors="coerce")
@@ -277,6 +279,7 @@ def parse_upload(upload):
                 x_type=(metadata.get("TYPE","")+" "+metadata.get("XUNITS","")).lower()
                 is_uv=any(token in x_type for token in ("wavelength","nm"))
                 series=[{"name":file_stem,"x":x[valid].to_numpy(float),"raw":y[valid].to_numpy(float),
+                         "source_file":upload.name,
                          "x_label":"Wavelength (nm)" if is_uv else "Raman Shift (cm⁻¹)",
                          "y_label":"Absorbance" if is_uv else "Intensity"}]
                 if len(series[0]["x"])>=2:
@@ -322,6 +325,7 @@ def parse_upload(upload):
                 if any(existing["name"]==curve_name for existing in series):
                     curve_name=f"{curve_name} ({i+1})"
                 series.append({"name":curve_name,"x":x[good].to_numpy(float),"raw":y[good].to_numpy(float),
+                               "source_file":upload.name,
                                "x_label":x_label,"y_label":"Absorbance" if x_label=="Wavelength (nm)" else "Intensity"})
     else:
         # Retain support for headerless numeric CSV/TSV files.
@@ -341,6 +345,7 @@ def parse_upload(upload):
                 if good.sum()>=2:
                     label=file_stem if len(y_columns)==1 else f"{file_stem} · {df.columns[j]}"
                     series.append({"name":label,"x":x[good].to_numpy(float),"raw":y[good].to_numpy(float),
+                                   "source_file":upload.name,
                                    "x_label":x_label,"y_label":"Absorbance" if x_label=="Wavelength (nm)" else "Intensity"})
     if not series: raise ValueError("사용 가능한 X/Y 숫자 쌍이 없습니다.")
     return series
@@ -1298,7 +1303,19 @@ with st.sidebar:
 def selection_label(name):
     spec=next((item for item in mapped if item["name"]==name),None)
     if spec is None:
-        return name if len(name)<=52 else f"…{name[-49:]}"
+        spec=next((item for item in series if item["name"]==name),None)
+        label=name
+        if spec is not None:
+            source=spec.get("source_file")
+            if source:
+                stem=Path(source).stem
+                for prefix in (f"{stem} · ",f"{stem} - ",f"{stem}_"):
+                    if label.startswith(prefix):
+                        label=label[len(prefix):]
+                        break
+                if label==stem:
+                    label="전체 스펙트럼"
+        return label if len(label)<=42 else f"…{label[-39:]}"
     coord=spec.get("mapping_coordinate")
     stem=Path(spec.get("mapping_source",spec["name"].split(" · ")[0])).stem
     short_stem=stem if len(stem)<=18 else f"{stem[:15]}…"
@@ -1308,15 +1325,30 @@ def selection_label(name):
     return f"{short_stem} · 시간={value:g}"
 with st.sidebar:
     st.markdown("**그릴 스펙트럼 선택**")
-    regular_names=[name for name in names if name not in mapped_names and name not in error_source_names]
-    regular_key="graph_selected_regular"
-    regular_values=st.session_state.get(regular_key)
-    if regular_values is None or any(name not in regular_names for name in regular_values):
-        regular_values=[name for name in st.session_state.get("graph_selected",names) if name in regular_names]
-        st.session_state[regular_key]=regular_values
-    st.multiselect("일반 데이터",regular_names,key=regular_key,
-                   help="매핑 파일에 포함되지 않은 스펙트럼입니다.")
-    selected_for_plot=list(st.session_state[regular_key])
+    regular_specs=[s for s in series if s["name"] not in mapped_names and s["name"] not in error_source_names]
+    regular_source_groups={}
+    for spec in regular_specs:
+        source=spec.get("source_file") or "직접 입력 / 기타 데이터"
+        regular_source_groups.setdefault(source,[]).append(spec)
+    prior_regular=st.session_state.get("graph_selected_regular")
+    if prior_regular is None:
+        prior_regular=st.session_state.get("graph_selected",names)
+    selected_for_plot=[]
+    for source,group_specs in regular_source_groups.items():
+        group_names=[s["name"] for s in group_specs]
+        group_key=f"regular_curve_selection::{source}"
+        group_values=st.session_state.get(group_key)
+        if group_values is None:
+            group_values=[name for name in prior_regular if name in group_names]
+        else:
+            group_values=[name for name in group_values if name in group_names]
+        st.session_state[group_key]=group_values
+        heading=f"{Path(source).name} · {len(group_names)}개" if source!="직접 입력 / 기타 데이터" else f"{source} · {len(group_names)}개"
+        with st.expander(heading,expanded=False):
+            st.multiselect("이 파일에서 그릴 곡선",group_names,key=group_key,
+                           format_func=selection_label,label_visibility="collapsed")
+        selected_for_plot.extend(st.session_state[group_key])
+    st.session_state["graph_selected_regular"]=[name for group in regular_source_groups.values() for name in st.session_state[f"regular_curve_selection::{group[0].get('source_file') or '직접 입력 / 기타 데이터'}"]]
     for source,group_specs in mapped_source_groups.items():
         group_names=[s["name"] for s in group_specs if s["name"] not in error_source_names]
         group_key=f"mapped_curve_selection::{source}"
