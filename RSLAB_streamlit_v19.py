@@ -856,10 +856,9 @@ def move_fit(index, direction):
     fits[index],fits[target]=fits[target],fits[index]
     st.session_state["fit_results"]=fits
 
-def move_curve(index, direction):
-    """Move a curve and its keyed appearance settings together."""
+def swap_curve_positions(index, target):
+    """Swap two curves and keep their position-keyed appearance settings attached."""
     series=st.session_state.get("series",[])
-    target=index+direction
     if not 0 <= index < len(series) or not 0 <= target < len(series):
         return
     series[index],series[target]=series[target],series[index]
@@ -876,6 +875,26 @@ def move_curve(index, direction):
             st.session_state[right]=left_value
         elif right_exists:
             del st.session_state[right]
+
+def move_curve_to(index, target):
+    """Move a curve to a target position while preserving its appearance settings."""
+    series=st.session_state.get("series",[])
+    if not 0 <= index < len(series) or not 0 <= target < len(series):
+        return
+    step=1 if target>index else -1
+    while index!=target:
+        next_index=index+step
+        swap_curve_positions(index,next_index)
+        index=next_index
+
+def move_curve(index, direction):
+    move_curve_to(index,index+direction)
+
+def reverse_curve_order():
+    """Reverse all curves and preserve each curve's keyed appearance settings."""
+    series=st.session_state.get("series",[])
+    for index in range(len(series)//2):
+        swap_curve_positions(index,len(series)-1-index)
 
 def axis_tick_options_ui(container, axis_name, key_prefix):
     with container:
@@ -1529,14 +1548,20 @@ with tabs[0]:
                 graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
                 old_names=names.copy()
                 with st.expander("곡선 순서 변경",expanded=False):
-                    st.caption("곡선 옆의 ‘위로’ 또는 ‘아래로’를 누르면 그래프와 범례 순서가 바뀝니다.")
+                    st.caption("순서를 바꾸면 그래프 그리기 순서와 범례 순서가 함께 바뀝니다.")
+                    st.button("순서 전체 뒤집기",key="reverse_curve_order",
+                              on_click=reverse_curve_order,use_container_width=True)
                     for order_i,curve in enumerate(series):
-                        order_name,up_col,down_col=st.columns([6,2,2],vertical_alignment="center")
+                        order_name,top_col,up_col,down_col,bottom_col=st.columns([4,1.6,0.8,0.8,1.6],vertical_alignment="center")
                         order_name.write(curve["name"])
+                        top_col.button("맨 위",key=f"curve_top_{order_i}",disabled=order_i==0,
+                                       on_click=move_curve_to,args=(order_i,0),use_container_width=True)
                         up_col.button("위로",key=f"curve_up_{order_i}",disabled=order_i==0,
                                       on_click=move_curve,args=(order_i,-1),use_container_width=True)
                         down_col.button("아래로",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
                                         on_click=move_curve,args=(order_i,1),use_container_width=True)
+                        bottom_col.button("맨 아래",key=f"curve_bottom_{order_i}",disabled=order_i==len(series)-1,
+                                          on_click=move_curve_to,args=(order_i,len(series)-1),use_container_width=True)
                 st.markdown("**곡선 색상 및 선 굵기**")
                 selected_style_names=set(selected)
                 for i,s in enumerate(series):
