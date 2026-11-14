@@ -1017,11 +1017,37 @@ def interpolate_palette(colors,count,index):
     rgb=points[left]*(1-fraction)+points[right]*fraction
     return to_hex(rgb)
 
-def state_json(series):
-    data=[]
-    for s in series:
-        data.append({k:(v.tolist() if isinstance(v,np.ndarray) else v) for k,v in s.items()})
-    return json.dumps(data,ensure_ascii=False)
+def json_safe(value):
+    """Convert supported session values to JSON and reject transient objects."""
+    if isinstance(value,np.ndarray):
+        return [json_safe(item) for item in value.tolist()]
+    if isinstance(value,np.generic):
+        return json_safe(value.item())
+    if value is None or isinstance(value,(str,bool,int)):
+        return value
+    if isinstance(value,float):
+        return value if np.isfinite(value) else None
+    if isinstance(value,dict):
+        return {str(key):json_safe(item) for key,item in value.items()}
+    if isinstance(value,(list,tuple,set)):
+        return [json_safe(item) for item in value]
+    raise TypeError(f"JSON으로 저장할 수 없는 값: {type(value).__name__}")
+
+def state_json(series, session_state):
+    """Save spectra together with every serializable app setting."""
+    data=[{key:json_safe(value) for key,value in item.items()} for item in series]
+    excluded={"series","uploads","session_upload","graph_palette_upload",
+              "curve_editor_open","curve_editor_name","curve_editor_error"}
+    settings={}
+    for key,value in session_state.items():
+        if key in excluded or str(key).startswith("_"):
+            continue
+        try:
+            settings[str(key)]=json_safe(value)
+        except (TypeError,ValueError):
+            continue
+    return json.dumps({"format":"rslab-session","version":2,
+                       "series":data,"settings":settings},ensure_ascii=False,allow_nan=False)
 
 def refresh_linked_errors(items):
     """Attach imported error-curve Y values to targets on the target X grid."""
@@ -1214,18 +1240,38 @@ with st.sidebar:
         st.session_state["fit_results"]=[]
         st.session_state["graph_visible_fit_ids"]=[]
     if st.session_state.series:
-        st.download_button("현재 세션 저장 (.json)",state_json(st.session_state.series),"rslab_session.json","application/json",use_container_width=True)
+        st.caption("스펙트럼 데이터와 그래프·처리 설정을 함께 저장하고 복원합니다.")
+        st.download_button("현재 세션 저장 (.json)",state_json(st.session_state.series,st.session_state),"rslab_session.json","application/json",use_container_width=True)
         session=st.file_uploader("세션 불러오기 (.json)",type="json",key="session_upload")
         if session and st.button("세션 적용"):
-            raw=json.loads(session.getvalue().decode("utf-8"))
-            restored=[{**s,"x":np.asarray(s["x"]),"raw":np.asarray(s["raw"]),
-                       **({"error":np.asarray(s["error"],dtype=float)} if s.get("error") is not None else {})}
-                      for s in raw]
-            st.session_state.series=make_series_names_unique(restored)
-            st.session_state["fit_results"]=[]
-            st.session_state["graph_visible_fit_ids"]=[]
-            st.session_state["graph_selected"]=[s["name"] for s in st.session_state.series]
-            st.rerun()
+            try:
+                payload=json.loads(session.getvalue().decode("utf-8"))
+                if isinstance(payload,list):
+                    raw_series=payload
+                    saved_settings={}
+                elif isinstance(payload,dict) and isinstance(payload.get("series"),list):
+                    raw_series=payload["series"]
+                    saved_settings=payload.get("settings",{}) if isinstance(payload.get("settings",{}),dict) else {}
+                else:
+                    raise ValueError("스펙트럼 데이터가 포함된 RSLAB 세션 파일이 아닙니다.")
+                restored=[{**s,"x":np.asarray(s["x"],dtype=float),"raw":np.asarray(s["raw"],dtype=float),
+                           **({"error":np.asarray(s["error"],dtype=float)} if s.get("error") is not None else {})}
+                          for s in raw_series]
+                st.session_state.series=make_series_names_unique(restored)
+                for key,value in saved_settings.items():
+                    if key not in {"series","uploads","session_upload","graph_palette_upload"} and not str(key).startswith("_"):
+                        st.session_state[key]=value
+                restored_names=[s["name"] for s in st.session_state.series]
+                if "graph_selected" in saved_settings:
+                    st.session_state["graph_selected"]=[name for name in saved_settings["graph_selected"] if name in restored_names]
+                else:
+                    st.session_state["graph_selected"]=restored_names
+                if not saved_settings:
+                    st.session_state["fit_results"]=[]
+                    st.session_state["graph_visible_fit_ids"]=[]
+                st.rerun()
+            except Exception as error:
+                st.error(f"세션 파일을 적용하지 못했습니다: {error}")
     if st.session_state.series:
         parsed_names=[s["name"] for s in st.session_state.series]
         aliases=st.session_state.pop("graph_name_aliases",{})
@@ -1595,6 +1641,10 @@ with tabs[0]:
                                    "color_palette_template.txt","text/plain",key="palette_template_download")
                 try:
                     uploaded_palette=extract_uploaded_palette(palette_upload)
+                    if uploaded_palette:
+                        st.session_state["uploaded_palette_colors"]=list(uploaded_palette)
+                    else:
+                        uploaded_palette=list(st.session_state.get("uploaded_palette_colors",[]))
                 except Exception as e:
                     uploaded_palette=[]
                     st.warning(f"팔레트를 읽을 수 없습니다: {e}")
