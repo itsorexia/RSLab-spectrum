@@ -1045,7 +1045,9 @@ def is_transient_widget_state_key(key):
         "run_curve_fit","open_curve_editor","palette_template_download",
     }
     return (key in fixed or key.endswith("_add") or
-            key.startswith(("uploaded_palette_swatch_","fit_up_","fit_down_","delete_fit_")))
+            key.startswith(("uploaded_palette_swatch_","fit_up_","fit_down_","delete_fit_",
+                            "blank_tab_","curve_editor_")) or
+            "_sheet_editor_" in key or key.startswith("curve_editor_table"))
 
 def state_json(series, session_state, scope="full"):
     """Save spectra and/or every serializable app setting."""
