@@ -1925,7 +1925,7 @@ with tabs[0]:
                     xlab=st.text_input("X축 제목",series[0]["x_label"],key="graph_xlabel")
                     ylab=st.text_input("Y축 제목","Normalized Intensity" if normalization!="없음" else series[0]["y_label"],key="graph_ylabel")
                     title=st.text_input("그래프 제목",key="graph_title")
-                with st.expander("축 제목 위치",expanded=False):
+                with st.expander("축 제목 위치 / 그래프 제목 위치",expanded=False):
                     st.caption("간격 조절은 눈금에서 떨어지는 거리를 바꾸고, 그래프 좌표는 플롯 영역을 기준으로 제목 위치를 직접 지정합니다.")
                     x_label_position_mode=st.selectbox("X축 제목 위치 방식",["눈금과 간격 조절","그래프 좌표 지정"],key="graph_xlabel_position_mode")
                     if x_label_position_mode=="눈금과 간격 조절":
