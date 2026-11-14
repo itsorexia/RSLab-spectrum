@@ -1500,9 +1500,14 @@ with tabs[0]:
                     st.caption("로그 스케일 수직 스택은 곡선을 양수로 보정한 뒤 log₁₀ 단위로 쌓습니다. 첫 번째 곡선이 위쪽에 배치됩니다.")
                 else:
                     st.caption("현재 X축 범위 안의 최대 intensity에 10%를 더해 자동 간격을 계산합니다. 첫 번째 곡선이 위쪽에 배치됩니다.")
+                selected_stack_names=[name for name in selected if name in plot_names]
+                st.caption(f"자동 간격 계산 대상: 선택한 곡선 {len(selected_stack_names)}개")
                 with st.expander("곡선별 오프셋",expanded=False):
                     st.caption("각 곡선의 세로 위치를 개별 조정합니다."+(" 로그 스택에서는 log₁₀ 단위입니다." if log_stack_ui else ""))
-                    for i,s in enumerate(series):
+                    selected_offset_curves=[(i,s) for i,s in enumerate(series) if s["name"] in selected_stack_names]
+                    if not selected_offset_curves:
+                        st.caption("곡선별 오프셋을 설정하려면 먼저 곡선을 선택하세요.")
+                    for i,s in selected_offset_curves:
                         offset_name=f"{s['name']} 오프셋 (log₁₀ 단위)" if log_stack_ui else f"{s['name']} 오프셋"
                         s["offset"]=st.number_input(offset_name,value=float(s.get("offset",0)),key=f"off_{i}")
             with visual_tab:
@@ -1827,7 +1832,10 @@ with tabs[0]:
                 st.markdown("**축 범위**")
                 x_auto=st.checkbox("X축 자동 범위",value=True,key="graph_x_auto")
                 x_log=st.checkbox("X축 로그 스케일",value=False,key="graph_x_log")
-                all_x=np.concatenate([np.asarray(s["x"],dtype=float) for s in series if s["name"] not in error_source_names])
+                range_series=[s for s in series if s["name"] in selected and s["name"] not in error_source_names]
+                if not range_series:
+                    range_series=[s for s in series if s["name"] not in error_source_names]
+                all_x=np.concatenate([np.asarray(s["x"],dtype=float) for s in range_series])
                 finite_x=all_x[np.isfinite(all_x)]
                 positive_x=finite_x[finite_x>0]
                 data_xmin=float(np.min(positive_x)) if x_log and positive_x.size else float(np.min(finite_x))
@@ -1841,7 +1849,7 @@ with tabs[0]:
                 y_log=st.checkbox("Y축 로그 스케일",value=False,key="graph_y_log")
                 if x_log or y_log:
                     st.caption("로그 스케일에서는 해당 축의 0 이하 값이 표시되지 않습니다.")
-                all_y=np.concatenate([np.asarray(transform(s,opts),dtype=float) for s in series if s["name"] not in error_source_names])
+                all_y=np.concatenate([np.asarray(transform(s,opts),dtype=float) for s in range_series])
                 finite_y=all_y[np.isfinite(all_y)]
                 positive_y=finite_y[finite_y>0]
                 proc_min=float(np.min(positive_y)) if y_log and positive_y.size else float(np.min(finite_y))
@@ -1908,6 +1916,7 @@ with tabs[0]:
             # Base the automatic vertical stack spacing on the visible X range.
             # This keeps the gaps proportional when the user zooms into a narrower range.
             x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
+            # Only selected signal curves determine the stack heights and their order.
             visible_plot_names=[n for n in plot_names if n in plot_selected]
             log_stack=bool(stack and y_log)
             heights=[]
