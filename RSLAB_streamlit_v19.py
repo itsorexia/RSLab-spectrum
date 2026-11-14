@@ -1552,16 +1552,18 @@ with tabs[0]:
                     st.button("순서 전체 뒤집기",key="reverse_curve_order",
                               on_click=reverse_curve_order,use_container_width=True)
                     for order_i,curve in enumerate(series):
-                        order_name,top_col,up_col,down_col,bottom_col=st.columns([4,1.6,0.8,0.8,1.6],vertical_alignment="center")
-                        order_name.write(curve["name"])
-                        top_col.button("맨 위",key=f"curve_top_{order_i}",disabled=order_i==0,
-                                       on_click=move_curve_to,args=(order_i,0),use_container_width=True)
-                        up_col.button("위로",key=f"curve_up_{order_i}",disabled=order_i==0,
-                                      on_click=move_curve,args=(order_i,-1),use_container_width=True)
-                        down_col.button("아래로",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
-                                        on_click=move_curve,args=(order_i,1),use_container_width=True)
-                        bottom_col.button("맨 아래",key=f"curve_bottom_{order_i}",disabled=order_i==len(series)-1,
-                                          on_click=move_curve_to,args=(order_i,len(series)-1),use_container_width=True)
+                        with st.container(border=True):
+                            st.caption(curve["name"])
+                            top_col,bottom_col=st.columns(2)
+                            top_col.button("↑ 맨 위",key=f"curve_top_{order_i}",disabled=order_i==0,
+                                           on_click=move_curve_to,args=(order_i,0),use_container_width=True)
+                            bottom_col.button("↓ 맨 아래",key=f"curve_bottom_{order_i}",disabled=order_i==len(series)-1,
+                                              on_click=move_curve_to,args=(order_i,len(series)-1),use_container_width=True)
+                            up_col,down_col=st.columns(2)
+                            up_col.button("↑ 한 칸",key=f"curve_up_{order_i}",disabled=order_i==0,
+                                          on_click=move_curve,args=(order_i,-1),use_container_width=True)
+                            down_col.button("↓ 한 칸",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
+                                            on_click=move_curve,args=(order_i,1),use_container_width=True)
                 st.markdown("**곡선 색상 및 선 굵기**")
                 selected_style_names=set(selected)
                 for i,s in enumerate(series):
