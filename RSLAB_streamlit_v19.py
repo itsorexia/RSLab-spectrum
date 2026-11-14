@@ -386,10 +386,12 @@ def transform(s, opts):
         in_range=np.isfinite(x)&np.isfinite(y)&(x>=range_min)&(x<=range_max)
         if np.any(in_range):
             reference_y=y[in_range]
+        elif mode=="Maximum in X range":
+            return y
     if mode=="Min-max":
         lo,hi=np.nanmin(reference_y),np.nanmax(reference_y)
         y=(y-lo)/(hi-lo) if hi!=lo else y*0
-    elif mode=="Maximum":
+    elif mode in ("Maximum","Maximum in X range"):
         reference_max=np.nanmax(reference_y)
         if reference_max!=0: y=y/reference_max
     elif mode=="Custom divisor" and opts["divisor"]!=0: y=y/opts["divisor"]
@@ -416,8 +418,16 @@ def processed_error(s, opts):
     if mode=="Min-max":
         span=float(np.nanmax(reference)-np.nanmin(reference))
         return error/span if span>0 else error
-    if mode=="Maximum":
+    if mode in ("Maximum","Maximum in X range"):
         scale=abs(float(np.nanmax(reference)))
+        if selected_range is not None:
+            x_values=np.asarray(s["x"],dtype=float)
+            range_min,range_max=sorted((float(selected_range[0]),float(selected_range[1])))
+            in_range=np.isfinite(x_values)&np.isfinite(y)&(x_values>=range_min)&(x_values<=range_max)
+            if not np.any(in_range) and mode=="Maximum in X range":
+                return error
+            if np.any(in_range):
+                scale=abs(float(np.nanmax(y[in_range])))
         return error/scale if scale>0 else error
     if mode=="Custom divisor":
         scale=abs(float(opts.get("divisor",1.0)))
@@ -1433,17 +1443,35 @@ with st.sidebar:
     with normalization_tab:
         normalization_enabled=st.checkbox("Normalization 적용",value=False,key="normalization_enabled")
         if normalization_enabled:
-            normalization=st.selectbox("Normalization 종류",["Min-max","Maximum","Custom divisor"],key="normalization_method")
-            divisor=st.number_input("사용자 나눗수",value=1.0,format="%.6g",key="normalization_divisor") if normalization=="Custom divisor" else 1.0
+            normalization=st.selectbox("Normalization 종류",["Min-max","Maximum","지정 X 범위 최대값으로 나누기","Custom divisor"],key="normalization_method")
+            if normalization=="지정 X 범위 최대값으로 나누기":
+                st.caption("각 스펙트럼의 지정 X 범위 내 최대값으로 나눈 뒤, 같은 배율을 스펙트럼 전체에 적용합니다.")
+                norm_default_specs=[s for s in series if s["name"] in st.session_state.get("graph_selected",[]) and s["name"] not in error_source_names]
+                if not norm_default_specs:
+                    norm_default_specs=[s for s in series if s["name"] not in error_source_names]
+                norm_x_arrays=[np.asarray(s["x"],dtype=float) for s in norm_default_specs]
+                norm_x_values=np.concatenate(norm_x_arrays) if norm_x_arrays else np.asarray([],dtype=float)
+                norm_x_values=norm_x_values[np.isfinite(norm_x_values)]
+                norm_x_min_default=float(np.min(norm_x_values)) if norm_x_values.size else 0.0
+                norm_x_max_default=float(np.max(norm_x_values)) if norm_x_values.size else 1.0
+                norm_x1,norm_x2=st.columns(2)
+                normalization_x_min=norm_x1.number_input("정규화 X 최소",value=norm_x_min_default,format="%.6g",key="normalization_custom_xmin")
+                normalization_x_max=norm_x2.number_input("정규화 X 최대",value=norm_x_max_default,format="%.6g",key="normalization_custom_xmax")
+                normalization_scope="지정 X 범위"
+                divisor=1.0
+            else:
+                normalization_x_min,normalization_x_max=None,None
+                divisor=st.number_input("사용자 나눗수",value=1.0,format="%.6g",key="normalization_divisor") if normalization=="Custom divisor" else 1.0
             if normalization in ("Min-max","Maximum"):
                 normalization_scope=st.selectbox("정규화 기준 범위",["전체 데이터","현재 그래프 X 범위"],key="normalization_scope",
                                                  help="선택한 범위에서 정규화 기준값을 계산한 뒤 곡선 전체에 적용합니다.")
                 st.caption("현재 그래프 X 범위를 선택하면 축 설정의 X 최소·최대 사이 데이터로 기준값을 계산합니다.")
-            else:
+            elif normalization!="지정 X 범위 최대값으로 나누기":
                 normalization_scope="전체 데이터"
         else:
             normalization="없음"
             normalization_scope="전체 데이터"
+            normalization_x_min,normalization_x_max=None,None
             divisor=1.0
     with baseline_tab:
         baseline_enabled=st.checkbox("Baseline 적용",value=False,key="baseline_enabled")
@@ -1843,8 +1871,21 @@ with tabs[0]:
                 x1,x2=st.columns(2)
                 xmin=x1.number_input("X 최소",value=data_xmin,format="%.6g",disabled=x_auto,key="graph_xmin")
                 xmax=x2.number_input("X 최대",value=data_xmax,format="%.6g",disabled=x_auto,key="graph_xmax")
-                opts["normalization_range"]=(tuple(sorted((float(xmin),float(xmax))))
-                                              if normalization_scope=="현재 그래프 X 범위" else None)
+                if normalization=="지정 X 범위 최대값으로 나누기":
+                    opts["normalization"]="Maximum in X range"
+                    opts["normalization_range"]=(float(normalization_x_min),float(normalization_x_max))
+                    range_lo,range_hi=sorted((float(normalization_x_min),float(normalization_x_max)))
+                    missing_range_curves=[s["name"] for s in range_series
+                                          if not np.any(np.isfinite(np.asarray(s["x"],dtype=float)) &
+                                                        (np.asarray(s["x"],dtype=float)>=range_lo) &
+                                                        (np.asarray(s["x"],dtype=float)<=range_hi))]
+                    if missing_range_curves:
+                        shown_names=", ".join(missing_range_curves[:3])
+                        extra=f" 외 {len(missing_range_curves)-3}개" if len(missing_range_curves)>3 else ""
+                        st.warning(f"지정 X 범위에 데이터가 없는 곡선은 나누기 정규화를 적용하지 않습니다: {shown_names}{extra}")
+                else:
+                    opts["normalization_range"]=(tuple(sorted((float(xmin),float(xmax))))
+                                                  if normalization_scope=="현재 그래프 X 범위" else None)
                 y_auto=st.checkbox("Y축 자동 범위",value=True,key="graph_y_auto")
                 y_log=st.checkbox("Y축 로그 스케일",value=False,key="graph_y_log")
                 if x_log or y_log:
