@@ -1033,8 +1033,8 @@ def json_safe(value):
         return [json_safe(item) for item in value]
     raise TypeError(f"JSON으로 저장할 수 없는 값: {type(value).__name__}")
 
-def state_json(series, session_state):
-    """Save spectra together with every serializable app setting."""
+def state_json(series, session_state, scope="full"):
+    """Save spectra and/or every serializable app setting."""
     data=[{key:json_safe(value) for key,value in item.items()} for item in series]
     excluded={"series","uploads","session_upload","graph_palette_upload",
               "curve_editor_open","curve_editor_name","curve_editor_error"}
@@ -1046,7 +1046,7 @@ def state_json(series, session_state):
             settings[str(key)]=json_safe(value)
         except (TypeError,ValueError):
             continue
-    return json.dumps({"format":"rslab-session","version":2,
+    return json.dumps({"format":"rslab-session","version":3,"scope":scope,
                        "series":data,"settings":settings},ensure_ascii=False,allow_nan=False)
 
 def refresh_linked_errors(items):
@@ -1239,39 +1239,56 @@ with st.sidebar:
         st.session_state["graph_selected"]=[]
         st.session_state["fit_results"]=[]
         st.session_state["graph_visible_fit_ids"]=[]
+    st.caption("세션은 데이터와 그래프 설정을 함께 저장하거나, 그래프 설정만 따로 저장할 수 있습니다.")
     if st.session_state.series:
-        st.caption("스펙트럼 데이터와 그래프·처리 설정을 함께 저장하고 복원합니다.")
-        st.download_button("현재 세션 저장 (.json)",state_json(st.session_state.series,st.session_state),"rslab_session.json","application/json",use_container_width=True)
-        session=st.file_uploader("세션 불러오기 (.json)",type="json",key="session_upload")
-        if session and st.button("세션 적용"):
-            try:
-                payload=json.loads(session.getvalue().decode("utf-8"))
-                if isinstance(payload,list):
-                    raw_series=payload
-                    saved_settings={}
-                elif isinstance(payload,dict) and isinstance(payload.get("series"),list):
-                    raw_series=payload["series"]
-                    saved_settings=payload.get("settings",{}) if isinstance(payload.get("settings",{}),dict) else {}
-                else:
-                    raise ValueError("스펙트럼 데이터가 포함된 RSLAB 세션 파일이 아닙니다.")
-                restored=[{**s,"x":np.asarray(s["x"],dtype=float),"raw":np.asarray(s["raw"],dtype=float),
-                           **({"error":np.asarray(s["error"],dtype=float)} if s.get("error") is not None else {})}
-                          for s in raw_series]
+        st.download_button("데이터 + 그래프 설정 저장",state_json(st.session_state.series,st.session_state,"full"),
+                           "rslab_session.json","application/json",use_container_width=True,key="save_full_session")
+    st.download_button("그래프 설정만 저장",state_json([],st.session_state,"settings"),
+                       "rslab_graph_settings.json","application/json",use_container_width=True,key="save_graph_settings")
+    session=st.file_uploader("세션 불러오기 (.json)",type="json",key="session_upload")
+    if session and st.button("세션 적용",key="apply_session"):
+        try:
+            payload=json.loads(session.getvalue().decode("utf-8"))
+            if isinstance(payload,list):
+                raw_series=payload
+                saved_settings={}
+                scope="full"
+            elif isinstance(payload,dict) and isinstance(payload.get("series"),list):
+                raw_series=payload["series"]
+                saved_settings=payload.get("settings",{}) if isinstance(payload.get("settings",{}),dict) else {}
+                scope=payload.get("scope","full")
+            else:
+                raise ValueError("RSLAB 세션 파일 형식이 올바르지 않습니다.")
+            if scope not in {"full","settings"}:
+                raise ValueError("세션 파일의 저장 범위를 인식할 수 없습니다.")
+            if scope=="full":
+                restored=[]
+                for item in raw_series:
+                    if not isinstance(item,dict) or "x" not in item or "raw" not in item:
+                        raise ValueError("세션에 올바르지 않은 스펙트럼 데이터가 있습니다.")
+                    restored.append({**item,"x":np.asarray(item["x"],dtype=float),
+                                     "raw":np.asarray(item["raw"],dtype=float),
+                                     **({"error":np.asarray(item["error"],dtype=float)} if item.get("error") is not None else {})})
                 st.session_state.series=make_series_names_unique(restored)
-                for key,value in saved_settings.items():
-                    if key not in {"series","uploads","session_upload","graph_palette_upload"} and not str(key).startswith("_"):
-                        st.session_state[key]=value
-                restored_names=[s["name"] for s in st.session_state.series]
-                if "graph_selected" in saved_settings:
-                    st.session_state["graph_selected"]=[name for name in saved_settings["graph_selected"] if name in restored_names]
-                else:
-                    st.session_state["graph_selected"]=restored_names
-                if not saved_settings:
-                    st.session_state["fit_results"]=[]
-                    st.session_state["graph_visible_fit_ids"]=[]
-                st.rerun()
-            except Exception as error:
-                st.error(f"세션 파일을 적용하지 못했습니다: {error}")
+            for key,value in saved_settings.items():
+                if key not in {"series","uploads","session_upload","graph_palette_upload"} and not str(key).startswith("_"):
+                    st.session_state[key]=value
+            restored_names=[item["name"] for item in st.session_state.series]
+            if "graph_selected" in saved_settings and scope=="full":
+                st.session_state["graph_selected"]=[name for name in saved_settings["graph_selected"] if name in restored_names]
+            elif scope=="full":
+                st.session_state["graph_selected"]=restored_names
+            if scope=="full" and not saved_settings:
+                st.session_state["fit_results"]=[]
+                st.session_state["graph_visible_fit_ids"]=[]
+            st.session_state["session_load_message"]=("그래프 설정을 적용했습니다. 현재 데이터는 유지했습니다."
+                                                       if scope=="settings" else "세션을 적용했습니다.")
+            st.rerun()
+        except Exception as error:
+            st.error(f"세션 파일을 적용하지 못했습니다: {error}")
+    session_load_message=st.session_state.pop("session_load_message",None)
+    if session_load_message:
+        st.success(session_load_message)
     if st.session_state.series:
         parsed_names=[s["name"] for s in st.session_state.series]
         aliases=st.session_state.pop("graph_name_aliases",{})
