@@ -944,6 +944,12 @@ def apply_axis_label_positions(ax,x_mode,x_pad,x_coords,y_mode,y_pad,y_coords):
     else:
         ax.yaxis.labelpad=y_pad
 
+def apply_graph_title_position(ax,mode,pad,coords):
+    """Position the title by its gap from the axes or in axes-relative coordinates."""
+    if mode=="그래프 좌표 지정":
+        ax.title.set_transform(ax.transAxes)
+        ax.title.set_position(coords)
+
 def axis_tick_options_ui(container, axis_name, key_prefix):
     with container:
         st.markdown(f"**{axis_name} 눈금 숫자 표시**")
@@ -1943,6 +1949,26 @@ with tabs[0]:
                         y_label_coords=(y_label_x,y_label_y)
                         y_label_pad=4.0
                     st.caption("Y축 제목의 가로 좌표 0은 플롯 왼쪽, 1은 오른쪽이고 세로 좌표 0은 아래, 0.5는 가운데, 1은 위입니다.")
+                    st.markdown("**그래프 제목 위치**")
+                    graph_title_position_mode=st.selectbox(
+                        "그래프 제목 위치 방식",["위쪽 간격 조절","그래프 좌표 지정"],
+                        key="graph_title_position_mode")
+                    if graph_title_position_mode=="위쪽 간격 조절":
+                        graph_title_pad=st.number_input(
+                            "그래프 제목과 플롯 사이 간격 (pt)",min_value=-100.0,max_value=200.0,
+                            value=6.0,step=1.0,key="graph_title_pad")
+                        graph_title_coords=(0.5,1.0)
+                    else:
+                        title_x_col,title_y_col=st.columns(2)
+                        graph_title_x=title_x_col.number_input(
+                            "그래프 제목 가로 위치",min_value=-2.0,max_value=3.0,value=0.5,
+                            step=0.05,format="%.2f",key="graph_title_coord_x")
+                        graph_title_y=title_y_col.number_input(
+                            "그래프 제목 세로 위치",min_value=-2.0,max_value=3.0,value=1.0,
+                            step=0.05,format="%.2f",key="graph_title_coord_y")
+                        graph_title_coords=(graph_title_x,graph_title_y)
+                        graph_title_pad=6.0
+                    st.caption("그래프 좌표는 플롯 영역 기준입니다. 가로 0은 왼쪽, 0.5는 가운데, 1은 오른쪽이며 세로 0은 아래, 1은 위입니다.")
                 st.markdown("**축 범위**")
                 x_auto=st.checkbox("X축 자동 범위",value=True,key="graph_x_auto")
                 x_log=st.checkbox("X축 로그 스케일",value=False,key="graph_x_log")
@@ -2120,7 +2146,8 @@ with tabs[0]:
             preview_ax.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
             apply_axis_label_positions(preview_ax,x_label_position_mode,x_label_pad,x_label_coords,
                                       y_label_position_mode,y_label_pad,y_label_coords)
-            preview_ax.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
+            preview_ax.set_title(title or None,fontsize=title_font_size,color=axis_text_color,pad=graph_title_pad)
+            apply_graph_title_position(preview_ax,graph_title_position_mode,graph_title_pad,graph_title_coords)
             preview_ax.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,
                                    labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
             preview_ax.tick_params(axis="y",which="both",left=y_left,right=y_right,
@@ -2326,7 +2353,8 @@ with tabs[2]:
             ax2.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color); ax2.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
             apply_axis_label_positions(ax2,x_label_position_mode,x_label_pad,x_label_coords,
                                        y_label_position_mode,y_label_pad,y_label_coords)
-            ax2.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
+            ax2.set_title(title or None,fontsize=title_font_size,color=axis_text_color,pad=graph_title_pad)
+            apply_graph_title_position(ax2,graph_title_position_mode,graph_title_pad,graph_title_coords)
             ax2.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
             ax2.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
             if x_tick_interval>0 and not x_log: ax2.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
@@ -2555,7 +2583,8 @@ with tabs[4]:
     axout.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color); axout.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
     apply_axis_label_positions(axout,x_label_position_mode,x_label_pad,x_label_coords,
                                y_label_position_mode,y_label_pad,y_label_coords)
-    axout.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
+    axout.set_title(title or None,fontsize=title_font_size,color=axis_text_color,pad=graph_title_pad)
+    apply_graph_title_position(axout,graph_title_position_mode,graph_title_pad,graph_title_coords)
     axout.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
     axout.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
     if x_tick_interval>0 and not x_log: axout.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
