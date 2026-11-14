@@ -662,7 +662,7 @@ def make_plot(width_px, height_px, size_mode, margins, dpi):
     ax = fig.add_axes([left / fig_w, bottom / fig_h, plot_w / fig_w, plot_h / fig_h])
     return fig, ax
 
-def render_png_fixed_size(fig, width_px, height_px, render_dpi, base_dpi=100):
+def render_png_fixed_size(fig, width_px, height_px, render_dpi, base_dpi=100, transparent=False):
     """Supersample at render_dpi, then return a PNG at the exact target size."""
     width_px, height_px = int(width_px), int(height_px)
     if width_px <= 0 or height_px <= 0:
@@ -673,7 +673,7 @@ def render_png_fixed_size(fig, width_px, height_px, render_dpi, base_dpi=100):
     scale = min(scale, (max_render_pixels / (width_px * height_px)) ** 0.5)
     scale = max(1.0, scale)
     high_res = io.BytesIO()
-    fig.savefig(high_res, format="png", dpi=base_dpi * scale)
+    fig.savefig(high_res, format="png", dpi=base_dpi * scale, transparent=transparent)
     high_res.seek(0)
     with Image.open(high_res) as rendered:
         image = rendered.convert("RGBA")
@@ -1899,6 +1899,8 @@ with tabs[0]:
                 plot_box_height=int(canvas_height_px-margin_top-margin_bottom)
                 export_dpi=st.number_input("미리보기 / PNG 저장 DPI",min_value=100,max_value=1200,value=300,step=50,key="graph_export_dpi",
                                            help="미리보기와 PNG 저장에 같은 DPI를 적용합니다. DPI를 바꿔도 설정한 픽셀 크기는 유지됩니다.")
+                transparent_bg=st.checkbox("배경 투명하게",value=False,key="graph_transparent_background",
+                                           help="체크하면 그래프 바깥과 플롯 영역의 흰 배경을 투명하게 하여 미리보기와 PNG에 적용합니다.")
                 preview_dpi=export_dpi
                 base_font_options=["Arial","DejaVu Sans","Liberation Sans","Times New Roman"]
                 font_options=list(dict.fromkeys([*base_font_options,*sorted(BUNDLED_FONT_FAMILIES)]))
@@ -2074,6 +2076,9 @@ with tabs[0]:
             # metrics, tick styling, labels, margins, and line placement remain unchanged.
             apply_plot_font(font_family)
             preview_mpl_fig,preview_ax=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
+            if transparent_bg:
+                preview_mpl_fig.patch.set_alpha(0)
+                preview_ax.patch.set_alpha(0)
             apply_graph_frame(preview_ax,show_graph_frame,graph_frame_width)
             hover_curves=[]
             for n in names:
@@ -2139,7 +2144,8 @@ with tabs[0]:
                 "width":float(axes_bbox.width/figure_bbox.width*canvas_width_px),
                 "height":float(axes_bbox.height/figure_bbox.height*canvas_height_px),
             }
-            preview_png=render_png_fixed_size(preview_mpl_fig,canvas_width_px,canvas_height_px,preview_dpi)
+            preview_png=render_png_fixed_size(preview_mpl_fig,canvas_width_px,canvas_height_px,preview_dpi,
+                                               transparent=transparent_bg)
             plt.close(preview_mpl_fig)
             preview_image_b64=base64.b64encode(preview_png).decode("ascii")
             crosshair_script="""
@@ -2201,7 +2207,7 @@ with tabs[0]:
                        xlog="true" if x_log else "false",ylog="true" if y_log else "false")
             preview_html=f"""<!doctype html><html><head><meta charset="utf-8"><style>
             html,body{{margin:0;padding:0;overflow:hidden;background:transparent}}
-            #frame{{display:inline-block;padding:12px;background:#f3f6fa;border:1px solid #e1e7ef;
+            #frame{{display:inline-block;padding:12px;background:{'transparent' if transparent_bg else '#f3f6fa'};border:1px solid {'transparent' if transparent_bg else '#e1e7ef'};
               border-radius:10px;box-sizing:border-box}}
             #stage{{position:relative;width:{canvas_width_px}px;height:{canvas_height_px}px;overflow:hidden}}
             #graph{{display:block;width:{canvas_width_px}px;height:{canvas_height_px}px}}
@@ -2515,6 +2521,9 @@ with tabs[4]:
     st.subheader("그래프 저장")
     apply_plot_font(font_family)
     figout,axout=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
+    if transparent_bg:
+        figout.patch.set_alpha(0)
+        axout.patch.set_alpha(0)
     apply_graph_frame(axout,show_graph_frame,graph_frame_width)
     for n in names:
         if n in plot_selected:
@@ -2553,7 +2562,8 @@ with tabs[4]:
     add_y_scale_annotation(axout,y_tick_options,tick_font_size,axis_text_color)
     if legend: axout.legend(fontsize=legend_font_size,loc=legend_loc)
     if grid: axout.grid(True,alpha=.3)
-    png_data=render_png_fixed_size(figout,canvas_width_px,canvas_height_px,export_dpi); plt.close(figout)
+    png_data=render_png_fixed_size(figout,canvas_width_px,canvas_height_px,export_dpi,
+                                   transparent=transparent_bg); plt.close(figout)
     st.download_button(f"그래프 PNG ({canvas_width_px} × {canvas_height_px} px)",png_data,"spectrum.png","image/png")
     st.caption(f"플롯 박스: {plot_box_width} × {plot_box_height} px · 전체 PNG: {canvas_width_px} × {canvas_height_px} px · DPI: {export_dpi}")
     st.subheader("데이터 파일 저장")
