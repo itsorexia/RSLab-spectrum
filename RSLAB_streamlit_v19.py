@@ -896,6 +896,44 @@ def reverse_curve_order():
     for index in range(len(series)//2):
         swap_curve_positions(index,len(series)-1-index)
 
+def move_selected_curves(direction):
+    """Move selected curves together while retaining their relative order."""
+    series=st.session_state.get("series",[])
+    selected=set(st.session_state.get("curve_order_selection",[]))
+    selected_order=[curve["name"] for curve in series if curve["name"] in selected]
+    if not selected_order:
+        return
+    if direction=="up":
+        for index in range(1,len(series)):
+            if series[index]["name"] in selected and series[index-1]["name"] not in selected:
+                swap_curve_positions(index,index-1)
+    elif direction=="down":
+        for index in range(len(series)-2,-1,-1):
+            if series[index]["name"] in selected and series[index+1]["name"] not in selected:
+                swap_curve_positions(index,index+1)
+    elif direction=="top":
+        desired_order=selected_order+[curve["name"] for curve in series if curve["name"] not in selected]
+    elif direction=="bottom":
+        desired_order=[curve["name"] for curve in series if curve["name"] not in selected]+selected_order
+    else:
+        return
+    if direction in ("top","bottom"):
+        for target,name in enumerate(desired_order):
+            current=next((i for i,item in enumerate(series) if item["name"]==name),None)
+            if current is not None:
+                move_curve_to(current,target)
+
+def apply_axis_label_positions(ax,x_mode,x_pad,x_coords,y_mode,y_pad,y_coords):
+    """Apply axis-title distance from ticks or axes-relative placement."""
+    if x_mode=="그래프 좌표 지정":
+        ax.xaxis.set_label_coords(*x_coords)
+    else:
+        ax.xaxis.labelpad=x_pad
+    if y_mode=="그래프 좌표 지정":
+        ax.yaxis.set_label_coords(*y_coords)
+    else:
+        ax.yaxis.labelpad=y_pad
+
 def axis_tick_options_ui(container, axis_name, key_prefix):
     with container:
         st.markdown(f"**{axis_name} 눈금 숫자 표시**")
@@ -1548,22 +1586,28 @@ with tabs[0]:
                 graph_frame_width=synced_float_control("축 / 테두리 선 두께",0.1,5.0,1.0,0.1,"graph_frame_width",disabled=not show_graph_frame)
                 old_names=names.copy()
                 with st.expander("곡선 순서 변경",expanded=False):
-                    st.caption("순서를 바꾸면 그래프 그리기 순서와 범례 순서가 함께 바뀝니다.")
+                    st.caption("곡선을 여러 개 선택한 뒤 이동 버튼을 누르세요. 이동 후에도 선택은 유지됩니다.")
                     st.button("순서 전체 뒤집기",key="reverse_curve_order",
                               on_click=reverse_curve_order,use_container_width=True)
-                    for order_i,curve in enumerate(series):
-                        with st.container(border=True):
-                            st.caption(curve["name"])
-                            top_col,bottom_col=st.columns(2)
-                            top_col.button("↑ 맨 위",key=f"curve_top_{order_i}",disabled=order_i==0,
-                                           on_click=move_curve_to,args=(order_i,0),use_container_width=True)
-                            bottom_col.button("↓ 맨 아래",key=f"curve_bottom_{order_i}",disabled=order_i==len(series)-1,
-                                              on_click=move_curve_to,args=(order_i,len(series)-1),use_container_width=True)
-                            up_col,down_col=st.columns(2)
-                            up_col.button("↑ 한 칸",key=f"curve_up_{order_i}",disabled=order_i==0,
-                                          on_click=move_curve,args=(order_i,-1),use_container_width=True)
-                            down_col.button("↓ 한 칸",key=f"curve_down_{order_i}",disabled=order_i==len(series)-1,
-                                            on_click=move_curve,args=(order_i,1),use_container_width=True)
+                    curve_order_names=[curve["name"] for curve in series]
+                    if "curve_order_selection" in st.session_state:
+                        st.session_state["curve_order_selection"]=[
+                            name for name in st.session_state["curve_order_selection"] if name in curve_order_names
+                        ]
+                    st.multiselect("이동할 곡선 (여러 개 선택 가능)",curve_order_names,
+                                   key="curve_order_selection",label_visibility="collapsed",
+                                   placeholder="이동할 곡선을 선택하세요")
+                    selected_order_names=st.session_state.get("curve_order_selection",[])
+                    top_col,up_col=st.columns(2)
+                    bottom_col,down_col=st.columns(2)
+                    top_col.button("↑ 맨 위로",key="selected_curves_top",disabled=not selected_order_names,
+                                   on_click=move_selected_curves,args=("top",),use_container_width=True)
+                    up_col.button("↑ 한 칸 위로",key="selected_curves_up",disabled=not selected_order_names,
+                                  on_click=move_selected_curves,args=("up",),use_container_width=True)
+                    bottom_col.button("↓ 맨 아래로",key="selected_curves_bottom",disabled=not selected_order_names,
+                                      on_click=move_selected_curves,args=("bottom",),use_container_width=True)
+                    down_col.button("↓ 한 칸 아래로",key="selected_curves_down",disabled=not selected_order_names,
+                                    on_click=move_selected_curves,args=("down",),use_container_width=True)
                 st.markdown("**곡선 색상 및 선 굵기**")
                 selected_style_names=set(selected)
                 for i,s in enumerate(series):
@@ -1756,6 +1800,30 @@ with tabs[0]:
                     xlab=st.text_input("X축 제목",series[0]["x_label"],key="graph_xlabel")
                     ylab=st.text_input("Y축 제목","Normalized Intensity" if normalization!="없음" else series[0]["y_label"],key="graph_ylabel")
                     title=st.text_input("그래프 제목",key="graph_title")
+                with st.expander("축 제목 위치",expanded=False):
+                    st.caption("간격 조절은 눈금에서 떨어지는 거리를 바꾸고, 그래프 좌표는 플롯 영역을 기준으로 제목 위치를 직접 지정합니다.")
+                    x_label_position_mode=st.selectbox("X축 제목 위치 방식",["눈금과 간격 조절","그래프 좌표 지정"],key="graph_xlabel_position_mode")
+                    if x_label_position_mode=="눈금과 간격 조절":
+                        x_label_pad=st.number_input("X축 제목과 눈금 사이 간격 (pt)",min_value=-100.0,max_value=200.0,value=4.0,step=1.0,key="graph_xlabel_pad")
+                        x_label_coords=(0.5,-0.15)
+                    else:
+                        x_coord_col,y_coord_col=st.columns(2)
+                        x_label_x=x_coord_col.number_input("X축 제목 가로 위치",min_value=-2.0,max_value=3.0,value=0.5,step=0.05,format="%.2f",key="graph_xlabel_coord_x")
+                        x_label_y=y_coord_col.number_input("X축 제목 세로 위치",min_value=-2.0,max_value=3.0,value=-0.15,step=0.05,format="%.2f",key="graph_xlabel_coord_y")
+                        x_label_coords=(x_label_x,x_label_y)
+                        x_label_pad=4.0
+                    st.caption("가로 0은 왼쪽, 0.5는 가운데, 1은 오른쪽입니다. 세로 0은 플롯 아래, 1은 위이며 범위 밖 숫자도 입력할 수 있습니다.")
+                    y_label_position_mode=st.selectbox("Y축 제목 위치 방식",["눈금과 간격 조절","그래프 좌표 지정"],key="graph_ylabel_position_mode")
+                    if y_label_position_mode=="눈금과 간격 조절":
+                        y_label_pad=st.number_input("Y축 제목과 눈금 사이 간격 (pt)",min_value=-100.0,max_value=200.0,value=4.0,step=1.0,key="graph_ylabel_pad")
+                        y_label_coords=(-0.15,0.5)
+                    else:
+                        x_coord_col,y_coord_col=st.columns(2)
+                        y_label_x=x_coord_col.number_input("Y축 제목 가로 위치",min_value=-2.0,max_value=3.0,value=-0.15,step=0.05,format="%.2f",key="graph_ylabel_coord_x")
+                        y_label_y=y_coord_col.number_input("Y축 제목 세로 위치",min_value=-2.0,max_value=3.0,value=0.5,step=0.05,format="%.2f",key="graph_ylabel_coord_y")
+                        y_label_coords=(y_label_x,y_label_y)
+                        y_label_pad=4.0
+                    st.caption("Y축 제목의 가로 좌표 0은 플롯 왼쪽, 1은 오른쪽이고 세로 좌표 0은 아래, 0.5는 가운데, 1은 위입니다.")
                 st.markdown("**축 범위**")
                 x_auto=st.checkbox("X축 자동 범위",value=True,key="graph_x_auto")
                 x_log=st.checkbox("X축 로그 스케일",value=False,key="graph_x_log")
@@ -1911,6 +1979,8 @@ with tabs[0]:
                 preview_ax.set_ylim(min(ymin,ymax),max(ymin,ymax))
             preview_ax.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color)
             preview_ax.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
+            apply_axis_label_positions(preview_ax,x_label_position_mode,x_label_pad,x_label_coords,
+                                      y_label_position_mode,y_label_pad,y_label_coords)
             preview_ax.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
             preview_ax.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,
                                    labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
@@ -2041,6 +2111,8 @@ with tabs[1]:
         average_ax.plot(average_curve["x"],average_curve["y"],color="#d62728",linewidth=2,label=average_curve["name"])
         average_ax.set_xlabel(format_axis_label(average_axis),fontsize=axis_label_size,color=axis_text_color)
         average_ax.set_ylabel(format_axis_label(str(next((s.get("y_label","Intensity") for s in series if s["name"] in average_targets),"Intensity"))),fontsize=axis_label_size,color=axis_text_color)
+        apply_axis_label_positions(average_ax,x_label_position_mode,x_label_pad,x_label_coords,
+                                  y_label_position_mode,y_label_pad,y_label_coords)
         average_ax.tick_params(labelsize=tick_font_size,labelcolor=axis_text_color)
         average_ax.grid(True,alpha=.3)
         average_ax.legend()
@@ -2112,6 +2184,8 @@ with tabs[2]:
                 if visible_limits: ax2.set_ylim(*visible_limits)
             else: ax2.set_ylim(min(ymin,ymax),max(ymin,ymax))
             ax2.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color); ax2.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
+            apply_axis_label_positions(ax2,x_label_position_mode,x_label_pad,x_label_coords,
+                                       y_label_position_mode,y_label_pad,y_label_coords)
             ax2.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
             ax2.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
             ax2.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
@@ -2336,6 +2410,8 @@ with tabs[4]:
             axout.set_ylim(ylo,yhi)
     else: axout.set_ylim(min(ymin,ymax),max(ymin,ymax))
     axout.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color); axout.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
+    apply_axis_label_positions(axout,x_label_position_mode,x_label_pad,x_label_coords,
+                               y_label_position_mode,y_label_pad,y_label_coords)
     axout.set_title(title or None,fontsize=title_font_size,color=axis_text_color)
     axout.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
     axout.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
