@@ -1033,6 +1033,20 @@ def json_safe(value):
         return [json_safe(item) for item in value]
     raise TypeError(f"JSON으로 저장할 수 없는 값: {type(value).__name__}")
 
+def is_transient_widget_state_key(key):
+    """Exclude button/upload widgets that Streamlit does not allow restoring."""
+    key=str(key)
+    fixed={
+        "uploads","session_upload","graph_palette_upload",
+        "apply_session","save_full_session","save_graph_settings",
+        "loaded_error_link","loaded_error_unlink","curve_editor_apply","curve_editor_close",
+        "select_all_graph_curves","reverse_curve_order","selected_curves_top",
+        "selected_curves_up","selected_curves_bottom","selected_curves_down",
+        "run_curve_fit","open_curve_editor","palette_template_download",
+    }
+    return (key in fixed or key.endswith("_add") or
+            key.startswith(("uploaded_palette_swatch_","fit_up_","fit_down_","delete_fit_")))
+
 def state_json(series, session_state, scope="full"):
     """Save spectra and/or every serializable app setting."""
     data=[{key:json_safe(value) for key,value in item.items()} for item in series]
@@ -1040,7 +1054,7 @@ def state_json(series, session_state, scope="full"):
               "curve_editor_open","curve_editor_name","curve_editor_error"}
     settings={}
     for key,value in session_state.items():
-        if key in excluded or str(key).startswith("_"):
+        if key in excluded or str(key).startswith("_") or is_transient_widget_state_key(key):
             continue
         try:
             settings[str(key)]=json_safe(value)
@@ -1271,7 +1285,8 @@ with st.sidebar:
                                      **({"error":np.asarray(item["error"],dtype=float)} if item.get("error") is not None else {})})
                 st.session_state.series=make_series_names_unique(restored)
             for key,value in saved_settings.items():
-                if key not in {"series","uploads","session_upload","graph_palette_upload"} and not str(key).startswith("_"):
+                if (key not in {"series","uploads","session_upload","graph_palette_upload"}
+                        and not str(key).startswith("_") and not is_transient_widget_state_key(key)):
                     st.session_state[key]=value
             restored_names=[item["name"] for item in st.session_state.series]
             if "graph_selected" in saved_settings and scope=="full":
