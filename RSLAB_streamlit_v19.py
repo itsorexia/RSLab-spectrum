@@ -1056,6 +1056,22 @@ def is_transient_widget_state_key(key):
                             "blank_tab_","curve_editor_")) or
             "_sheet_editor_" in key or key.startswith("curve_editor_table"))
 
+def sync_targets_to_graph_selection(widget_key,selected_names,candidate_names):
+    """Default analysis targets to plotted curves, refreshing only when that selection changes."""
+    selected_names=list(selected_names)
+    candidate_names=list(candidate_names)
+    source=[name for name in selected_names if name in candidate_names]
+    tracker_key=f"_analysis_selection_source::{widget_key}"
+    signature={"selected":selected_names,"candidates":candidate_names}
+    if st.session_state.get(tracker_key)!=signature:
+        st.session_state[widget_key]=source
+        st.session_state[tracker_key]=signature
+    else:
+        st.session_state[widget_key]=[
+            name for name in st.session_state.get(widget_key,source) if name in candidate_names
+        ]
+    return source
+
 def state_json(series, session_state, scope="full"):
     """Save spectra and/or every serializable app setting."""
     data=[{key:json_safe(value) for key,value in item.items()} for item in series]
@@ -2261,11 +2277,7 @@ with tabs[1]:
     average_axis_labels=list(dict.fromkeys(str(s.get("x_label","X")) for s in series))
     average_axis=st.selectbox("평균 계산 X축",average_axis_labels,key="graph_average_axis")
     average_candidates=[s["name"] for s in series if s["name"] not in error_source_names and str(s.get("x_label","X"))==average_axis]
-    average_default=[n for n in selected if n in average_candidates]
-    if "graph_average_targets" in st.session_state:
-        st.session_state["graph_average_targets"]=[n for n in st.session_state["graph_average_targets"] if n in average_candidates]
-    else:
-        st.session_state["graph_average_targets"]=average_default
+    sync_targets_to_graph_selection("graph_average_targets",selected,average_candidates)
     average_targets=st.multiselect("평균에 포함할 곡선",average_candidates,key="graph_average_targets")
     average_enabled=st.checkbox("평균 곡선 계산",value=True,key="graph_average_enabled")
     average_curve=compute_average_curve(average_targets,series,proc,average_axis) if average_enabled else None
@@ -2307,41 +2319,63 @@ with tabs[2]:
     peak_tab,max_tab,range_stats_tab=st.tabs(["피크 찾기","맥스 인텐시티","범위 통계"])
     with peak_tab:
         st.subheader("피크 찾기")
-        target=st.selectbox("분석 곡선",plot_names,key="peak_series")
+        sync_targets_to_graph_selection("peak_series_targets",selected,plot_names)
+        peak_targets=st.multiselect("분석 곡선",plot_names,key="peak_series_targets",
+                                    placeholder="그리기로 선택한 곡선이 기본 선택됩니다.")
         prominence_col,distance_col=st.columns(2)
         prominence=prominence_col.number_input("최소 prominence",min_value=0.0,value=0.0)
         distance=distance_col.number_input("최소 피크 간격 (points)",min_value=1,value=1)
-        y=proc[target]; s=next(z for z in series if z["name"]==target)
-        peaks,_=find_peaks(y,prominence=prominence,distance=int(distance))
-        peaks=peaks[(s["x"][peaks]>=min(xmin,xmax))&(s["x"][peaks]<=max(xmin,xmax))]
-        peak_df=pd.DataFrame({"index":peaks,"X":s["x"][peaks],"Y":y[peaks]})
-        st.write(f"찾은 피크: {len(peaks)}개")
+        peak_tables=[]
+        peaks_by_target={}
+        for peak_target in peak_targets:
+            peak_s=next(z for z in series if z["name"]==peak_target)
+            peak_y_values=np.asarray(proc[peak_target],dtype=float)
+            peak_indices,_=find_peaks(peak_y_values,prominence=prominence,distance=int(distance))
+            in_range=((peak_s["x"][peak_indices]>=min(xmin,xmax))&
+                      (peak_s["x"][peak_indices]<=max(xmin,xmax)))
+            peak_indices=peak_indices[in_range]
+            peaks_by_target[peak_target]=peak_indices
+            if len(peak_indices):
+                peak_tables.append(pd.DataFrame({
+                    "곡선":peak_target,"index":peak_indices,
+                    "X":peak_s["x"][peak_indices],"Y":peak_y_values[peak_indices]}))
+        peak_df=(pd.concat(peak_tables,ignore_index=True) if peak_tables else
+                 pd.DataFrame(columns=["곡선","index","X","Y"]))
+        st.write(f"분석 곡선: {len(peak_targets)}개 · 찾은 피크: {len(peak_df)}개")
         st.dataframe(peak_df,use_container_width=True)
-        if len(peaks):
+        if len(peak_df):
             apply_plot_font(font_family)
             fig2,ax2=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
             apply_graph_frame(ax2,show_graph_frame,graph_frame_width)
-            peak_plot_names=[n for n in plot_names if n in plot_selected]
-            if target not in peak_plot_names and target in plot_names:
-                peak_plot_names.append(target)
+            peak_plot_names=[n for n in plot_names if n in plot_selected or n in peak_targets]
             peak_log_lifts=dict(log_stack_lifts)
-            if log_stack and target not in log_stack_lifts:
-                target_values=np.asarray(y,dtype=float)
-                target_values=target_values[np.isfinite(target_values)]
-                if target_values.size:
-                    target_low=float(np.min(target_values)); target_high=float(np.max(target_values))
-                    target_floor=max(np.finfo(float).tiny,max(abs(target_low),abs(target_high),np.finfo(float).tiny)*1e-6)
-                    peak_log_lifts[target]=max(0.0,target_floor-target_low)
-            peak_target_y=stacked_curve_y(y,target,peak_plot_names,auto,offset_step,style,
-                                          log_stack,peak_log_lifts)
-            for n in peak_plot_names:
-                peak_s=next(z for z in series if z["name"]==n)
-                peak_y=stacked_curve_y(proc[n],n,peak_plot_names,auto,offset_step,style,
-                                       log_stack,peak_log_lifts)
+            if log_stack:
+                for name in peak_plot_names:
+                    if name in peak_log_lifts:
+                        continue
+                    values=np.asarray(proc[name],dtype=float)
+                    values=values[np.isfinite(values)]
+                    if values.size:
+                        low=float(np.min(values)); high=float(np.max(values))
+                        floor=max(np.finfo(float).tiny,max(abs(low),abs(high),np.finfo(float).tiny)*1e-6)
+                        peak_log_lifts[name]=max(0.0,floor-low)
+            for name in peak_plot_names:
+                peak_s=next(z for z in series if z["name"]==name)
+                peak_curve_y=stacked_curve_y(proc[name],name,peak_plot_names,auto,offset_step,style,
+                                             log_stack,peak_log_lifts)
                 error_values=processed_error(peak_s,opts)
-                draw_curve(ax2,peak_s,peak_y,n,style[n]["color"],style[n]["linewidth"],
+                draw_curve(ax2,peak_s,peak_curve_y,name,style[name]["color"],style[name]["linewidth"],
                            plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
-            ax2.scatter(s["x"][peaks],peak_target_y[peaks],color="red",zorder=5)
+            for peak_target in peak_targets:
+                peak_indices=peaks_by_target[peak_target]
+                if not len(peak_indices):
+                    continue
+                peak_s=next(z for z in series if z["name"]==peak_target)
+                peak_curve_y=stacked_curve_y(proc[peak_target],peak_target,peak_plot_names,auto,offset_step,style,
+                                             log_stack,peak_log_lifts)
+                ax2.scatter(peak_s["x"][peak_indices],peak_curve_y[peak_indices],
+                            color=style[peak_target]["color"],edgecolors="black",linewidths=0.4,
+                            zorder=5,label=f"{peak_target} 피크")
             if x_log: ax2.set_xscale("log")
             if y_log: ax2.set_yscale("log")
             ax2.set_xlim(min(xmin,xmax),max(xmin,xmax))
@@ -2351,25 +2385,32 @@ with tabs[2]:
                                if y_log else visible_stack_ylim(series,proc,plot_names,peak_plot_names,auto,offset_step,style,xmin,xmax))
                 if visible_limits: ax2.set_ylim(*visible_limits)
             else: ax2.set_ylim(min(ymin,ymax),max(ymin,ymax))
-            ax2.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color); ax2.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
+            ax2.set_xlabel(format_axis_label(xlab),fontsize=axis_label_size,color=axis_text_color)
+            ax2.set_ylabel(format_axis_label(ylab),fontsize=axis_label_size,color=axis_text_color)
             apply_axis_label_positions(ax2,x_label_position_mode,x_label_pad,x_label_coords,
                                        y_label_position_mode,y_label_pad,y_label_coords)
             ax2.set_title(title or None,fontsize=title_font_size,color=axis_text_color,pad=graph_title_pad)
             apply_graph_title_position(ax2,graph_title_position_mode,graph_title_pad,graph_title_coords)
-            ax2.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
-            ax2.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
+            ax2.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,
+                            labelsize=tick_font_size,labelcolor=axis_text_color)
+            ax2.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,
+                            labelsize=tick_font_size,labelcolor=axis_text_color)
             if x_tick_interval>0 and not x_log: ax2.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
             if y_tick_interval>0 and not y_log: ax2.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
             ax2.yaxis.set_major_formatter(y_tick_formatter)
             add_y_scale_annotation(ax2,y_tick_options,tick_font_size,axis_text_color)
             if grid: ax2.grid(True,alpha=.3)
             if legend: ax2.legend(fontsize=legend_font_size,loc=legend_loc)
-            st.image(render_png_fixed_size(fig2,canvas_width_px,canvas_height_px,preview_dpi),width=canvas_width_px); plt.close(fig2)
+            st.image(render_png_fixed_size(fig2,canvas_width_px,canvas_height_px,preview_dpi),width=canvas_width_px)
+            plt.close(fig2)
             st.download_button("피크 결과 CSV",peak_df.to_csv(index=False).encode("utf-8-sig"),"peaks.csv","text/csv")
+        elif peak_targets:
+            st.info("선택한 곡선에서 설정한 X 범위 안에 피크가 없습니다.")
     with max_tab:
         st.subheader("선택 곡선의 최대 intensity")
         st.caption("왼쪽 처리 설정의 SG 필터, baseline 보정, normalization 결과에서 최대값을 계산합니다.")
-        max_targets=st.multiselect("최대값을 계산할 곡선",plot_names,default=[n for n in selected if n in plot_names],key="max_targets")
+        sync_targets_to_graph_selection("max_targets",selected,plot_names)
+        max_targets=st.multiselect("최대값을 계산할 곡선",plot_names,key="max_targets")
         use_graph_range=st.checkbox("현재 그래프 X 범위 사용",value=True,key="max_use_graph_range")
         if use_graph_range:
             max_xmin,max_xmax=sorted((float(xmin),float(xmax)))
@@ -2418,8 +2459,8 @@ with tabs[2]:
         stats_axis=st.selectbox("X축 종류",axis_labels,key="range_stats_axis")
         axis_series=[s for s in series if s["name"] not in error_source_names and str(s.get("x_label","X"))==stats_axis]
         axis_names=[s["name"] for s in axis_series]
-        default_stats=[n for n in selected if n in axis_names] or axis_names
-        stats_targets=st.multiselect("계산할 곡선",axis_names,default=default_stats,key="range_stats_targets")
+        sync_targets_to_graph_selection("range_stats_targets",selected,axis_names)
+        stats_targets=st.multiselect("계산할 곡선",axis_names,key="range_stats_targets")
         if stats_targets:
             selected_stats=[s for s in axis_series if s["name"] in stats_targets]
             range_min=min(float(np.nanmin(s["x"])) for s in selected_stats)
