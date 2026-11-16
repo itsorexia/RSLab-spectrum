@@ -116,9 +116,48 @@ def parse_upload(upload):
     """Parse ordinary tables and files containing repeated spectrum blocks."""
     text=read_text(upload)
     lines=text.splitlines()
+    file_stem=Path(upload.name).stem
+
+    # Read this app's own processed-data exports before generic header detection.
+    # Metadata comments can contain commas even when the numeric table is tab-delimited.
+    if any(re.match(r"^\s*#\s*RSLab export\s*:",line,re.IGNORECASE) for line in lines):
+        columns_line=next((re.match(r"^\s*#\s*Columns\s*:\s*(.*)$",line,re.IGNORECASE)
+                           for line in lines if re.match(r"^\s*#\s*Columns\s*:",line,re.IGNORECASE)),None)
+        x_label="X"
+        y_label="Intensity"
+        source_name=file_stem
+        for line in lines:
+            source_match=re.match(r"^\s*#\s*Source\s*:\s*(.*?)\s*$",line,re.IGNORECASE)
+            if source_match and source_match.group(1).strip():
+                source_name=source_match.group(1).strip()
+            labels_match=re.match(r"^\s*#\s*X label\s*:\s*(.*?)(?:,\s*Y label\s*:\s*(.*))?\s*$",line,re.IGNORECASE)
+            if labels_match:
+                x_label=labels_match.group(1).strip() or x_label
+                y_label=(labels_match.group(2) or y_label).strip()
+        if columns_line:
+            column_text=columns_line.group(1).strip()
+            delimiter="\t" if "\t" in column_text else "," if "," in column_text else r"\s+"
+        else:
+            delimiter="\t"
+        try:
+            exported_df=pd.read_csv(io.StringIO(text),sep=delimiter,comment="#",header=None,
+                                    engine="python",on_bad_lines="skip")
+            if exported_df.shape[1]>=2:
+                x=pd.to_numeric(exported_df.iloc[:,0],errors="coerce")
+                y=pd.to_numeric(exported_df.iloc[:,1],errors="coerce")
+                valid=x.notna() & y.notna()
+                if int(valid.sum())>=2:
+                    return [{"name":source_name,"x":x[valid].to_numpy(float),
+                             "raw":y[valid].to_numpy(float),"source_file":upload.name,
+                             "x_label":x_label,"y_label":y_label}]
+        except (ValueError,IndexError,pd.errors.ParserError):
+            pass
+
     x_terms=("wavelength","raman","shift","wavenumber","wave number","cm-1","cm⁻¹","x-axis","x axis")
     header_rows=[]
     for i,line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
         low=line.lower()
         counts={d:line.count(d) for d in (",","\t",";")}
         sep=max(counts,key=counts.get)
@@ -126,8 +165,6 @@ def parse_upload(upload):
             header_rows.append((i,sep))
 
     series=[]
-    file_stem=Path(upload.name).stem
-
     def row_is_numeric(line,sep):
         try:
             fields=next(csv.reader([line],delimiter=sep))
@@ -138,7 +175,8 @@ def parse_upload(upload):
 
     # Wide mapping exports store one spectrum per row: a spectral-axis header,
     # followed by a time coordinate or X/Y coordinates and then intensity values.
-    first_idx=next((i for i,line in enumerate(lines) if line.strip()),None)
+    first_idx=next((i for i,line in enumerate(lines)
+                    if line.strip() and not line.lstrip().startswith("#")),None)
     # Re-import the paired X/Y table used when selected curves have different X grids.
     # Each curve has its own "name | X [axis label]" and "name | Y" columns;
     # an optional "name | Error" column is attached to that curve on import.
