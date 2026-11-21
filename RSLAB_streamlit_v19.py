@@ -474,7 +474,8 @@ def processed_error(s, opts):
 
 def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
                scatter_marker=("o",True), error_capsize=3.0, error_capthick=1.0, error_linewidth=1.0,
-               bar_layout="겹쳐서", bar_index=0, bar_count=1):
+               bar_layout="겹쳐서", bar_index=0, bar_count=1,
+               bar_color=None, bar_edgecolor="#333333", bar_edgewidth=0.8):
     """Draw one series and render supplied Y uncertainties for scatter and bar plots."""
     x=np.asarray(s["x"],dtype=float)
     y=np.asarray(y,dtype=float)
@@ -501,8 +502,9 @@ def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
             individual_width=bar_width/bar_count
             bar_x=bar_x+(bar_index-(bar_count-1)/2)*individual_width
             bar_width=individual_width
-        bars=ax.bar(bar_x,bar_y,width=bar_width,label=label,color=color,alpha=0.55,
-                    linewidth=max(0.0,linewidth*0.35))
+        bars=ax.bar(bar_x,bar_y,width=bar_width,label=label,
+                    color=bar_color or color,edgecolor=bar_edgecolor,
+                    alpha=0.65,linewidth=max(0.0,float(bar_edgewidth)))
         if error is not None:
             err=np.asarray(error,dtype=float)
             if len(err)==len(y):
@@ -1914,6 +1916,22 @@ with tabs[0]:
                                         color_col.markdown(f"<div title='{palette_color}' style='width:34px;height:28px;background:{palette_color};border:1px solid #cbd5e1;border-radius:6px;margin:4px auto'></div>",unsafe_allow_html=True)
                                 curve_width=(synced_float_control("개별 선 굵기",0.5,10.0,float(line_width),0.1,f"lw_{i}")
                                              if width_mode=="곡선별 지정" else float(line_width))
+                                if plot_style=="막대그래프":
+                                    fill_col,edge_col=st.columns(2)
+                                    bar_fill_color=fill_col.color_picker(
+                                        "막대 채우기 색상",value=st.session_state.get(f"bar_fill_{i}",curve_color),
+                                        key=f"bar_fill_{i}")
+                                    bar_edge_color=edge_col.color_picker(
+                                        "막대 테두리 색상",value=st.session_state.get(f"bar_edge_{i}","#333333"),
+                                        key=f"bar_edge_{i}")
+                                    bar_edge_width=st.number_input(
+                                        "막대 테두리 두께",min_value=0.0,max_value=5.0,
+                                        value=float(st.session_state.get(f"bar_edge_width_{i}",0.8)),
+                                        step=0.1,key=f"bar_edge_width_{i}")
+                                else:
+                                    bar_fill_color=st.session_state.get(f"bar_fill_{i}",curve_color)
+                                    bar_edge_color=st.session_state.get(f"bar_edge_{i}","#333333")
+                                    bar_edge_width=float(st.session_state.get(f"bar_edge_width_{i}",0.8))
                         else:
                             # Keep hidden curves' style available to other views without rendering
                             # editors for spectra that are not currently selected.
@@ -1926,7 +1944,12 @@ with tabs[0]:
                                              if color_mode=="곡선별 지정" else palette_color)
                             curve_width=(float(st.session_state.get(f"lw_{i}",st.session_state.get(f"lw_{i}_input",line_width)))
                                          if width_mode=="곡선별 지정" else float(line_width))
-                        style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width}
+                            bar_fill_color=st.session_state.get(f"bar_fill_{i}",curve_color)
+                            bar_edge_color=st.session_state.get(f"bar_edge_{i}","#333333")
+                            bar_edge_width=float(st.session_state.get(f"bar_edge_width_{i}",0.8))
+                        style[s["name"]]={"color":curve_color,"offset":float(s.get("offset",0)),"linewidth":curve_width,
+                                           "bar_color":bar_fill_color,"bar_edgecolor":bar_edge_color,
+                                           "bar_edgewidth":bar_edge_width}
                     if not selected_style_names:
                         st.caption("색상과 굵기를 설정할 스펙트럼을 먼저 선택하세요.")
                     curve_name_error=st.session_state.pop("curve_name_error",None)
@@ -2257,7 +2280,9 @@ with tabs[0]:
                     plot_s={**s,"x":categorical_curve_x(s,bar_category_positions)} if categorical_x else s
                     draw_curve(preview_ax,plot_s,curve_y,n,style[n]["color"],style[n]["linewidth"],
                                plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth,
-                               bar_layout,preview_bar_names.index(n),len(preview_bar_names))
+                               bar_layout,preview_bar_names.index(n),len(preview_bar_names),
+                               style[n].get("bar_color"),style[n].get("bar_edgecolor","#333333"),
+                               style[n].get("bar_edgewidth",0.8))
                     valid=np.isfinite(curve_x)&np.isfinite(curve_y)
                     valid_indices=np.flatnonzero(valid)
                     if len(valid_indices)>20000:
@@ -2510,7 +2535,8 @@ with tabs[2]:
                 peak_plot_s={**peak_s,"x":categorical_curve_x(peak_s,peak_category_positions)} if categorical_x else peak_s
                 draw_curve(ax2,peak_plot_s,peak_curve_y,name,style[name]["color"],style[name]["linewidth"],
                            plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth,
-                           bar_layout,peak_bar_index,len(peak_plot_names))
+                           bar_layout,peak_bar_index,len(peak_plot_names),style[name].get("bar_color"),
+                           style[name].get("bar_edgecolor","#333333"),style[name].get("bar_edgewidth",0.8))
             for peak_target in peak_targets:
                 peak_indices=peaks_by_target[peak_target]
                 if not len(peak_indices):
@@ -2765,7 +2791,8 @@ with tabs[4]:
             export_plot_s={**s,"x":categorical_curve_x(s,export_category_positions)} if categorical_x else s
             draw_curve(axout,export_plot_s,plotted_y,n,style[n]["color"],style[n]["linewidth"],
                        plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth,
-                       bar_layout,export_bar_names.index(n),len(export_bar_names))
+                       bar_layout,export_bar_names.index(n),len(export_bar_names),style[n].get("bar_color"),
+                       style[n].get("bar_edgecolor","#333333"),style[n].get("bar_edgewidth",0.8))
     if show_fit_overlay and not categorical_x:
         draw_fit_overlays(axout,overlay_fit_results,visible_fit_ids,visible_plot_names,
                           plot_names,auto,offset_step,style,log_stack,log_stack_lifts)
