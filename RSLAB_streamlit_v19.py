@@ -520,12 +520,12 @@ def categorical_x_layout(series, curve_names, x_min=None, x_max=None):
             if key not in seen:
                 seen.add(key)
                 categories.append(key)
-    positions={value:index for index,value in enumerate(categories)}
     visible=[value for value in categories
              if x_min is None or x_max is None or min(x_min,x_max)<=value<=max(x_min,x_max)]
     if not visible:
         visible=categories
-    tick_positions=[positions[value] for value in visible]
+    positions={value:index for index,value in enumerate(visible)}
+    tick_positions=list(range(len(visible)))
     tick_labels=[np.format_float_positional(value,trim="-") for value in visible]
     if tick_positions:
         limits=(min(tick_positions)-0.5,max(tick_positions)+0.5)
@@ -1732,14 +1732,13 @@ with tabs[0]:
                     st.session_state["graph_plot_style"]="산점도"
                 plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도","막대그래프"],key="graph_plot_style")
                 bar_layout="겹쳐서"
-                bar_x_spacing="숫자 간격"
                 if plot_style=="막대그래프":
                     bar_layout=st.radio("막대 배치",["겹쳐서","나란히"],horizontal=True,
                                         key="graph_bar_layout")
-                    bar_x_spacing=st.radio("X축 값 간격",["숫자 간격","동일 간격 (텍스트처럼)"],
-                                           horizontal=True,key="graph_bar_x_spacing",
-                                           help="동일 간격을 선택하면 4.2, 10.5, 21, 42 같은 X값을 숫자 크기와 관계없이 같은 간격으로 배치하고, 원래 값은 축 라벨로 표시합니다.")
-                categorical_bar_x=plot_style=="막대그래프" and bar_x_spacing=="동일 간격 (텍스트처럼)"
+                x_spacing_mode=st.radio("X축 값 간격",["숫자 간격","동일 간격 (텍스트처럼)"],
+                                         horizontal=True,key="graph_x_spacing_mode",
+                                         help="동일 간격을 선택하면 라인·산점도·막대그래프 모두에서 X값을 항목처럼 같은 간격으로 배치하고, 원래 값은 축 라벨로 표시합니다.")
+                categorical_x=x_spacing_mode=="동일 간격 (텍스트처럼)"
                 scatter_marker=("o",True)
                 error_capsize,error_capthick,error_linewidth=3.0,1.0,1.0
                 if plot_style=="산점도":
@@ -1773,8 +1772,8 @@ with tabs[0]:
                     else:
                         st.session_state["graph_visible_fit_ids"]=[fit_id for fit_id in current_fit_ids if fit_id in valid_fit_ids]
                     show_fit_overlay=st.checkbox("피팅 곡선 그래프에 표시",value=True,key="graph_show_fit_overlay",
-                                                  disabled=categorical_bar_x)
-                    if categorical_bar_x:
+                                                  disabled=categorical_x)
+                    if categorical_x:
                         show_fit_overlay=False
                         st.caption("동일 간격 X축에서는 숫자 X축 피팅 곡선을 겹쳐 표시하지 않습니다.")
                     fit_labels={fit["id"]:f"{fit['curve_name']} · {fit['model']} · {fit['purpose']}" for fit in fit_results}
@@ -2087,8 +2086,8 @@ with tabs[0]:
                     st.caption("그래프 좌표는 플롯 영역 기준입니다. 가로 0은 왼쪽, 0.5는 가운데, 1은 오른쪽이며 세로 0은 아래, 1은 위입니다.")
                 st.markdown("**축 범위**")
                 x_auto=st.checkbox("X축 자동 범위",value=True,key="graph_x_auto")
-                x_log=st.checkbox("X축 로그 스케일",value=False,key="graph_x_log",disabled=categorical_bar_x)
-                if categorical_bar_x and st.session_state.get("graph_x_log",False):
+                x_log=st.checkbox("X축 로그 스케일",value=False,key="graph_x_log",disabled=categorical_x)
+                if categorical_x and st.session_state.get("graph_x_log",False):
                     st.caption("동일 간격 X축에서는 로그 스케일을 적용하지 않습니다.")
                     x_log=False
                 range_series=[s for s in series if s["name"] in selected and s["name"] not in error_source_names]
@@ -2136,7 +2135,7 @@ with tabs[0]:
                 y_left=ticks2.checkbox("왼쪽 Y 눈금",value=True,key="graph_y_left")
                 y_right=ticks2.checkbox("오른쪽 Y 눈금",value=False,key="graph_y_right")
                 x_tick_interval=st.number_input("X 눈금 간격 (0=자동)",min_value=0.0,value=0.0,step=1.0,
-                                                key="graph_x_tick_interval",disabled=categorical_bar_x)
+                                                key="graph_x_tick_interval",disabled=categorical_x)
                 y_tick_interval=st.number_input("Y 눈금 간격 (0=자동)",min_value=0.0,value=0.0,step=0.1,key="graph_y_tick_interval")
                 with st.expander("눈금 숫자 표시 형식",expanded=False):
                     y_tick_options=axis_tick_options_ui(st.container(),"Y축","y_tick_label")
@@ -2191,7 +2190,7 @@ with tabs[0]:
             x_range_min,x_range_max=sorted((float(xmin),float(xmax)))
             # Only selected signal curves determine the stack heights and their order.
             visible_plot_names=[n for n in plot_names if n in plot_selected]
-            if categorical_bar_x:
+            if categorical_x:
                 bar_category_positions,bar_category_ticks,bar_category_labels,bar_category_limits=categorical_x_layout(
                     series,visible_plot_names,xmin,xmax)
                 bar_hover_category_labels=[np.format_float_positional(value,trim="-")
@@ -2245,7 +2244,7 @@ with tabs[0]:
                     curve_y=stacked_curve_y(proc[n],n,visible_plot_names,auto,offset_step,style,
                                             log_stack,log_stack_lifts)
                     error_values=processed_error(s,opts)
-                    plot_s={**s,"x":categorical_curve_x(s,bar_category_positions)} if categorical_bar_x else s
+                    plot_s={**s,"x":categorical_curve_x(s,bar_category_positions)} if categorical_x else s
                     draw_curve(preview_ax,plot_s,curve_y,n,style[n]["color"],style[n]["linewidth"],
                                plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth,
                                bar_layout,preview_bar_names.index(n),len(preview_bar_names))
@@ -2253,20 +2252,20 @@ with tabs[0]:
                     valid_indices=np.flatnonzero(valid)
                     if len(valid_indices)>20000:
                         valid_indices=valid_indices[np.linspace(0,len(valid_indices)-1,20000,dtype=int)]
-                    hover_x=(categorical_curve_x(s,bar_category_positions) if categorical_bar_x else curve_x)
+                    hover_x=(categorical_curve_x(s,bar_category_positions) if categorical_x else curve_x)
                     order=np.argsort(hover_x[valid_indices])
                     hover_item={"name":n,"x":hover_x[valid_indices][order].tolist(),
                                 "y":curve_y[valid_indices][order].tolist()}
-                    if categorical_bar_x:
+                    if categorical_x:
                         hover_item["raw_x"]=[float(value) for value in curve_x[valid_indices][order]]
                     hover_curves.append(hover_item)
-            if show_fit_overlay and not categorical_bar_x:
+            if show_fit_overlay and not categorical_x:
                 draw_fit_overlays(preview_ax,overlay_fit_results,visible_fit_ids,visible_plot_names,
                                   plot_names,auto,offset_step,style,log_stack,log_stack_lifts)
             if x_log: preview_ax.set_xscale("log")
             if y_log: preview_ax.set_yscale("log")
-            preview_ax.set_xlim(*(bar_category_limits if categorical_bar_x else (min(xmin,xmax),max(xmin,xmax))))
-            if categorical_bar_x:
+            preview_ax.set_xlim(*(bar_category_limits if categorical_x else (min(xmin,xmax),max(xmin,xmax))))
+            if categorical_x:
                 preview_ax.set_xticks(bar_category_ticks,bar_category_labels)
             if y_auto:
                 visible_limits=(visible_stack_log_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,
@@ -2289,7 +2288,7 @@ with tabs[0]:
                                    labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
             preview_ax.tick_params(axis="y",which="both",left=y_left,right=y_right,
                                    labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
-            if x_tick_interval>0 and not x_log and not categorical_bar_x:
+            if x_tick_interval>0 and not x_log and not categorical_x:
                 preview_ax.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
             if y_tick_interval>0 and not y_log:
                 preview_ax.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
@@ -2371,7 +2370,7 @@ with tabs[0]:
                        width=canvas_width_px,height=canvas_height_px,
                        xlim=json.dumps([float(preview_x_limits[0]),float(preview_x_limits[1])]),
                        ylim=json.dumps([float(preview_y_limits[0]),float(preview_y_limits[1])]),
-                       category_mode="true" if categorical_bar_x else "false",
+                       category_mode="true" if categorical_x else "false",
                        category_labels=json.dumps(bar_hover_category_labels,ensure_ascii=False),
                        enabled="true" if crosshair_enabled else "false",
                        xlog="true" if x_log else "false",ylog="true" if y_log else "false")
@@ -2477,7 +2476,7 @@ with tabs[2]:
             fig2,ax2=make_plot(plot_width,plot_height,size_mode,plot_margins,100)
             apply_graph_frame(ax2,show_graph_frame,graph_frame_width)
             peak_plot_names=[n for n in plot_names if n in plot_selected or n in peak_targets]
-            if categorical_bar_x:
+            if categorical_x:
                 peak_category_positions,peak_category_ticks,peak_category_labels,peak_category_limits=categorical_x_layout(
                     series,peak_plot_names,xmin,xmax)
             else:
@@ -2498,7 +2497,7 @@ with tabs[2]:
                 peak_curve_y=stacked_curve_y(proc[name],name,peak_plot_names,auto,offset_step,style,
                                              log_stack,peak_log_lifts)
                 error_values=processed_error(peak_s,opts)
-                peak_plot_s={**peak_s,"x":categorical_curve_x(peak_s,peak_category_positions)} if categorical_bar_x else peak_s
+                peak_plot_s={**peak_s,"x":categorical_curve_x(peak_s,peak_category_positions)} if categorical_x else peak_s
                 draw_curve(ax2,peak_plot_s,peak_curve_y,name,style[name]["color"],style[name]["linewidth"],
                            plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth,
                            bar_layout,peak_bar_index,len(peak_plot_names))
@@ -2510,14 +2509,14 @@ with tabs[2]:
                 peak_curve_y=stacked_curve_y(proc[peak_target],peak_target,peak_plot_names,auto,offset_step,style,
                                              log_stack,peak_log_lifts)
                 peak_scatter_x=(categorical_curve_x(peak_s,peak_category_positions)[peak_indices]
-                                if categorical_bar_x else peak_s["x"][peak_indices])
+                                if categorical_x else peak_s["x"][peak_indices])
                 ax2.scatter(peak_scatter_x,peak_curve_y[peak_indices],
                             color=style[peak_target]["color"],edgecolors="black",linewidths=0.4,
                             zorder=5,label=f"{peak_target} 피크")
             if x_log: ax2.set_xscale("log")
             if y_log: ax2.set_yscale("log")
-            ax2.set_xlim(*(peak_category_limits if categorical_bar_x else (min(xmin,xmax),max(xmin,xmax))))
-            if categorical_bar_x:
+            ax2.set_xlim(*(peak_category_limits if categorical_x else (min(xmin,xmax),max(xmin,xmax))))
+            if categorical_x:
                 ax2.set_xticks(peak_category_ticks,peak_category_labels)
             if y_auto:
                 visible_limits=(visible_stack_log_ylim(series,proc,plot_names,peak_plot_names,auto,offset_step,style,
@@ -2535,7 +2534,7 @@ with tabs[2]:
                             labelsize=tick_font_size,labelcolor=axis_text_color)
             ax2.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,
                             labelsize=tick_font_size,labelcolor=axis_text_color)
-            if x_tick_interval>0 and not x_log and not categorical_bar_x: ax2.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
+            if x_tick_interval>0 and not x_log and not categorical_x: ax2.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
             if y_tick_interval>0 and not y_log: ax2.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
             ax2.yaxis.set_major_formatter(y_tick_formatter)
             add_y_scale_annotation(ax2,y_tick_options,tick_font_size,axis_text_color)
@@ -2742,7 +2741,7 @@ with tabs[4]:
         axout.patch.set_alpha(0)
     apply_graph_frame(axout,show_graph_frame,graph_frame_width)
     export_bar_names=[n for n in names if n in plot_selected]
-    if categorical_bar_x:
+    if categorical_x:
         export_category_positions,export_category_ticks,export_category_labels,export_category_limits=categorical_x_layout(
             series,visible_plot_names,xmin,xmax)
     else:
@@ -2753,17 +2752,17 @@ with tabs[4]:
             plotted_y=stacked_curve_y(proc[n],n,visible_plot_names,auto,offset_step,style,
                                       log_stack,log_stack_lifts)
             error_values=processed_error(s,opts)
-            export_plot_s={**s,"x":categorical_curve_x(s,export_category_positions)} if categorical_bar_x else s
+            export_plot_s={**s,"x":categorical_curve_x(s,export_category_positions)} if categorical_x else s
             draw_curve(axout,export_plot_s,plotted_y,n,style[n]["color"],style[n]["linewidth"],
                        plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth,
                        bar_layout,export_bar_names.index(n),len(export_bar_names))
-    if show_fit_overlay and not categorical_bar_x:
+    if show_fit_overlay and not categorical_x:
         draw_fit_overlays(axout,overlay_fit_results,visible_fit_ids,visible_plot_names,
                           plot_names,auto,offset_step,style,log_stack,log_stack_lifts)
     if x_log: axout.set_xscale("log")
     if y_log: axout.set_yscale("log")
-    axout.set_xlim(*(export_category_limits if categorical_bar_x else (min(xmin,xmax),max(xmin,xmax))))
-    if categorical_bar_x:
+    axout.set_xlim(*(export_category_limits if categorical_x else (min(xmin,xmax),max(xmin,xmax))))
+    if categorical_x:
         axout.set_xticks(export_category_ticks,export_category_labels)
     if y_auto:
         visible_limits=(visible_stack_log_ylim(series,proc,plot_names,visible_plot_names,auto,offset_step,style,
@@ -2783,7 +2782,7 @@ with tabs[4]:
     apply_graph_title_position(axout,graph_title_position_mode,graph_title_pad,graph_title_coords)
     axout.tick_params(axis="x",which="both",bottom=x_bottom,top=x_top,labelbottom=x_bottom,labeltop=x_top,labelsize=tick_font_size,labelcolor=axis_text_color)
     axout.tick_params(axis="y",which="both",left=y_left,right=y_right,labelleft=y_left,labelright=y_right,labelsize=tick_font_size,labelcolor=axis_text_color)
-    if x_tick_interval>0 and not x_log and not categorical_bar_x: axout.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
+    if x_tick_interval>0 and not x_log and not categorical_x: axout.xaxis.set_major_locator(MultipleLocator(x_tick_interval))
     if y_tick_interval>0 and not y_log: axout.yaxis.set_major_locator(MultipleLocator(y_tick_interval))
     axout.yaxis.set_major_formatter(y_tick_formatter)
     add_y_scale_annotation(axout,y_tick_options,tick_font_size,axis_text_color)
