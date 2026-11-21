@@ -19,7 +19,7 @@ from scipy.signal import find_peaks, savgol_filter
 from scipy.optimize import curve_fit
 
 st.set_page_config(page_title="RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬", layout="wide")
-st.markdown("<div style='display:flex; align-items:baseline; gap:14px; margin:0 0 0.6rem 0; flex-wrap:wrap;'><span style='font-size:2.5rem; line-height:1.25; font-weight:700; color:#262730;'>RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬</span><span style='font-size:0.78rem; color:#b8b8b8;'>created by YS Park</span></div>", unsafe_allow_html=True)
+st.markdown("<div style='display:flex; align-items:baseline; gap:14px; margin:0 0 0.6rem 0; flex-wrap:wrap;'><span style='font-size:2.5rem; line-height:1.25; font-weight:700; color:#262730;'>RSLAB Spectrum 생성기 👨🏻‍🔬👩🏻‍🔬</span><span style='font-size:0.78rem; color:#b8b8b8;'>created by YS Park 안녕ㅎㅎ</span></div>", unsafe_allow_html=True)
 
 FONT_DIR=Path(__file__).resolve().parent/"fonts"
 BUNDLED_FONT_FAMILIES=set()
