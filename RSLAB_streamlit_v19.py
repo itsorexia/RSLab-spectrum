@@ -488,6 +488,16 @@ def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
                 ax.errorbar(x,y,yerr=err,fmt="none",ecolor=color,capsize=error_capsize,
                             capthick=error_capthick,elinewidth=error_linewidth,zorder=artist.get_zorder()-0.1)
         return artist
+    if plot_style=="막대그래프":
+        valid=np.isfinite(x)&np.isfinite(y)
+        bar_x=x[valid]
+        bar_y=y[valid]
+        unique_x=np.unique(bar_x)
+        positive_steps=np.diff(unique_x)
+        positive_steps=positive_steps[positive_steps>0]
+        bar_width=float(np.median(positive_steps)*0.8) if positive_steps.size else 0.8
+        return ax.bar(bar_x,bar_y,width=bar_width,label=label,color=color,alpha=0.55,
+                      linewidth=max(0.0,linewidth*0.35))
     return ax.plot(x,y,label=label,color=color,lw=linewidth)
 
 def fit_curve_model(x, y, purpose, model, sigma=None):
@@ -1682,7 +1692,7 @@ with tabs[0]:
             with visual_tab:
                 if st.session_state.get("graph_plot_style")=="에러바":
                     st.session_state["graph_plot_style"]="산점도"
-                plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도"],key="graph_plot_style")
+                plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도","막대그래프"],key="graph_plot_style")
                 scatter_marker=("o",True)
                 error_capsize,error_capthick,error_linewidth=3.0,1.0,1.0
                 if plot_style=="산점도":
