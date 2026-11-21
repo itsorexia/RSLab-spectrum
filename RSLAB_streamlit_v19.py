@@ -479,11 +479,13 @@ def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
     """Draw one series and render supplied Y uncertainties for scatter and bar plots."""
     x=np.asarray(s["x"],dtype=float)
     y=np.asarray(y,dtype=float)
-    if plot_style=="산점도":
+    if plot_style in ("산점도","산점도 + 라인 플롯"):
         marker,filled=scatter_marker
         facecolor=color if filled else "none"
+        if plot_style=="산점도 + 라인 플롯":
+            ax.plot(x,y,color=color,lw=linewidth,zorder=1)
         artist=ax.scatter(x,y,label=label,marker=marker,s=34,
-                          facecolors=facecolor,edgecolors=color,linewidths=max(0.7,linewidth))
+                          facecolors=facecolor,edgecolors=color,linewidths=max(0.7,linewidth),zorder=2)
         if error is not None:
             err=np.asarray(error,dtype=float)
             if len(err)==len(y) and np.isfinite(err).any():
@@ -1741,7 +1743,7 @@ with tabs[0]:
             with visual_tab:
                 if st.session_state.get("graph_plot_style")=="에러바":
                     st.session_state["graph_plot_style"]="산점도"
-                plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도","막대그래프"],key="graph_plot_style")
+                plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도","산점도 + 라인 플롯","막대그래프"],key="graph_plot_style")
                 bar_layout="겹쳐서"
                 if plot_style=="막대그래프":
                     bar_layout=st.radio("막대 배치",["겹쳐서","나란히"],horizontal=True,
@@ -1752,14 +1754,14 @@ with tabs[0]:
                 categorical_x=x_spacing_mode=="동일 간격 (텍스트처럼)"
                 scatter_marker=("o",True)
                 error_capsize,error_capthick,error_linewidth=3.0,1.0,1.0
-                if plot_style=="산점도":
+                if plot_style in ("산점도","산점도 + 라인 플롯"):
                     marker_options={"꽉 찬 원":("o",True),"안 찬 원":("o",False),
                                     "꽉 찬 네모":("s",True),"안 찬 네모":("s",False),
                                     "꽉 찬 삼각형":("^",True),"안 찬 삼각형":("^",False),
                                     "꽉 찬 마름모":("D",True),"안 찬 마름모":("D",False)}
                     marker_label=st.selectbox("점 모양",list(marker_options),key="graph_scatter_marker")
                     scatter_marker=marker_options[marker_label]
-                if plot_style in ("산점도","막대그래프"):
+                if plot_style in ("산점도","산점도 + 라인 플롯","막대그래프"):
                     has_error_data=any(s["name"] in selected and s.get("error") is not None and
                                        np.isfinite(np.asarray(s["error"],dtype=float)).any() for s in series)
                     st.caption("연결된 오차 데이터가 있으면 그래프에 에러바가 표시됩니다.")
