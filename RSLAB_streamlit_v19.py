@@ -473,7 +473,8 @@ def processed_error(s, opts):
     return error
 
 def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
-               scatter_marker=("o",True), error_capsize=3.0, error_capthick=1.0, error_linewidth=1.0):
+               scatter_marker=("o",True), error_capsize=3.0, error_capthick=1.0, error_linewidth=1.0,
+               bar_layout="겹쳐서", bar_index=0, bar_count=1):
     """Draw one series; scatter plots include supplied uncertainties as error bars."""
     x=np.asarray(s["x"],dtype=float)
     y=np.asarray(y,dtype=float)
@@ -496,6 +497,10 @@ def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
         positive_steps=np.diff(unique_x)
         positive_steps=positive_steps[positive_steps>0]
         bar_width=float(np.median(positive_steps)*0.8) if positive_steps.size else 0.8
+        if bar_layout=="나란히" and bar_count>1:
+            individual_width=bar_width/bar_count
+            bar_x=bar_x+(bar_index-(bar_count-1)/2)*individual_width
+            bar_width=individual_width
         return ax.bar(bar_x,bar_y,width=bar_width,label=label,color=color,alpha=0.55,
                       linewidth=max(0.0,linewidth*0.35))
     return ax.plot(x,y,label=label,color=color,lw=linewidth)
@@ -1693,6 +1698,10 @@ with tabs[0]:
                 if st.session_state.get("graph_plot_style")=="에러바":
                     st.session_state["graph_plot_style"]="산점도"
                 plot_style=st.selectbox("플롯 스타일",["라인 플롯","산점도","막대그래프"],key="graph_plot_style")
+                bar_layout="겹쳐서"
+                if plot_style=="막대그래프":
+                    bar_layout=st.radio("막대 배치",["겹쳐서","나란히"],horizontal=True,
+                                        key="graph_bar_layout")
                 scatter_marker=("o",True)
                 error_capsize,error_capthick,error_linewidth=3.0,1.0,1.0
                 if plot_style=="산점도":
@@ -2174,6 +2183,7 @@ with tabs[0]:
                 preview_ax.patch.set_alpha(0)
             apply_graph_frame(preview_ax,show_graph_frame,graph_frame_width)
             hover_curves=[]
+            preview_bar_names=[n for n in names if n in plot_selected]
             for n in names:
                 if n in plot_selected:
                     s=next(z for z in series if z["name"]==n)
@@ -2182,7 +2192,8 @@ with tabs[0]:
                                             log_stack,log_stack_lifts)
                     error_values=processed_error(s,opts)
                     draw_curve(preview_ax,s,curve_y,n,style[n]["color"],style[n]["linewidth"],
-                               plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
+                               plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth,
+                               bar_layout,preview_bar_names.index(n),len(preview_bar_names))
                     valid=np.isfinite(curve_x)&np.isfinite(curve_y)
                     valid_indices=np.flatnonzero(valid)
                     if len(valid_indices)>20000:
@@ -2412,13 +2423,14 @@ with tabs[2]:
                         low=float(np.min(values)); high=float(np.max(values))
                         floor=max(np.finfo(float).tiny,max(abs(low),abs(high),np.finfo(float).tiny)*1e-6)
                         peak_log_lifts[name]=max(0.0,floor-low)
-            for name in peak_plot_names:
+            for peak_bar_index,name in enumerate(peak_plot_names):
                 peak_s=next(z for z in series if z["name"]==name)
                 peak_curve_y=stacked_curve_y(proc[name],name,peak_plot_names,auto,offset_step,style,
                                              log_stack,peak_log_lifts)
                 error_values=processed_error(peak_s,opts)
                 draw_curve(ax2,peak_s,peak_curve_y,name,style[name]["color"],style[name]["linewidth"],
-                           plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
+                           plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth,
+                           bar_layout,peak_bar_index,len(peak_plot_names))
             for peak_target in peak_targets:
                 peak_indices=peaks_by_target[peak_target]
                 if not len(peak_indices):
@@ -2654,6 +2666,7 @@ with tabs[4]:
         figout.patch.set_alpha(0)
         axout.patch.set_alpha(0)
     apply_graph_frame(axout,show_graph_frame,graph_frame_width)
+    export_bar_names=[n for n in names if n in plot_selected]
     for n in names:
         if n in plot_selected:
             s=next(z for z in series if z["name"]==n)
@@ -2661,7 +2674,8 @@ with tabs[4]:
                                       log_stack,log_stack_lifts)
             error_values=processed_error(s,opts)
             draw_curve(axout,s,plotted_y,n,style[n]["color"],style[n]["linewidth"],
-                       plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth)
+                       plot_style,error_values,scatter_marker,error_capsize,error_capthick,error_linewidth,
+                       bar_layout,export_bar_names.index(n),len(export_bar_names))
     if show_fit_overlay:
         draw_fit_overlays(axout,overlay_fit_results,visible_fit_ids,visible_plot_names,
                           plot_names,auto,offset_step,style,log_stack,log_stack_lifts)
