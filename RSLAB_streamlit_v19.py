@@ -2358,8 +2358,13 @@ with tabs[2]:
     with peak_tab:
         st.subheader("피크 찾기")
         sync_targets_to_graph_selection("peak_series_targets",selected,plot_names)
-        peak_targets=st.multiselect("분석 곡선",plot_names,key="peak_series_targets",
-                                    placeholder="그리기로 선택한 곡선이 기본 선택됩니다.")
+        peak_target_selection=st.multiselect("분석 곡선",plot_names,key="peak_series_targets",
+                                             placeholder="그리기로 선택한 곡선이 기본 선택됩니다.")
+        # The multiselect can return names in the order they were clicked. Keep
+        # peak tables, annotations, and exports in the graph's configured order.
+        selected_peak_names=set(peak_target_selection)
+        peak_targets=[name for name in plot_names if name in selected_peak_names]
+        st.caption("피크 결과는 그래프에 설정한 곡선 순서대로 표시됩니다.")
         prominence_col,distance_col=st.columns(2)
         prominence=prominence_col.number_input("최소 prominence",min_value=0.0,value=0.0)
         distance=distance_col.number_input("최소 피크 간격 (points)",min_value=1,value=1)
