@@ -475,7 +475,7 @@ def processed_error(s, opts):
 def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
                scatter_marker=("o",True), error_capsize=3.0, error_capthick=1.0, error_linewidth=1.0,
                bar_layout="겹쳐서", bar_index=0, bar_count=1):
-    """Draw one series; scatter plots include supplied uncertainties as error bars."""
+    """Draw one series and render supplied Y uncertainties for scatter and bar plots."""
     x=np.asarray(s["x"],dtype=float)
     y=np.asarray(y,dtype=float)
     if plot_style=="산점도":
@@ -501,8 +501,17 @@ def draw_curve(ax, s, y, label, color, linewidth, plot_style, error=None,
             individual_width=bar_width/bar_count
             bar_x=bar_x+(bar_index-(bar_count-1)/2)*individual_width
             bar_width=individual_width
-        return ax.bar(bar_x,bar_y,width=bar_width,label=label,color=color,alpha=0.55,
-                      linewidth=max(0.0,linewidth*0.35))
+        bars=ax.bar(bar_x,bar_y,width=bar_width,label=label,color=color,alpha=0.55,
+                    linewidth=max(0.0,linewidth*0.35))
+        if error is not None:
+            err=np.asarray(error,dtype=float)
+            if len(err)==len(y):
+                valid_error=valid & np.isfinite(err) & (err>=0)
+                if np.any(valid_error):
+                    ax.errorbar(bar_x[valid_error],bar_y[valid_error],yerr=err[valid_error],fmt="none",
+                                ecolor="#222222",capsize=error_capsize,capthick=error_capthick,
+                                elinewidth=error_linewidth,zorder=bars.patches[0].get_zorder()+2)
+        return bars
     return ax.plot(x,y,label=label,color=color,lw=linewidth)
 
 def categorical_x_layout(series, curve_names, x_min=None, x_max=None):
@@ -1748,9 +1757,10 @@ with tabs[0]:
                                     "꽉 찬 마름모":("D",True),"안 찬 마름모":("D",False)}
                     marker_label=st.selectbox("점 모양",list(marker_options),key="graph_scatter_marker")
                     scatter_marker=marker_options[marker_label]
+                if plot_style in ("산점도","막대그래프"):
                     has_error_data=any(s["name"] in selected and s.get("error") is not None and
                                        np.isfinite(np.asarray(s["error"],dtype=float)).any() for s in series)
-                    st.caption("연결된 오차 데이터가 있으면 산점도 점에 에러바가 함께 표시됩니다.")
+                    st.caption("연결된 오차 데이터가 있으면 그래프에 에러바가 표시됩니다.")
                     if has_error_data:
                         st.caption("정규화 배율은 오차에도 반영됩니다. baseline·SG 필터의 오차 전파는 계산하지 않습니다.")
                         cap_col,thickness_col=st.columns(2)
