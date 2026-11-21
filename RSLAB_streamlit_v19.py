@@ -2453,7 +2453,9 @@ with tabs[2]:
         st.subheader("선택 곡선의 최대 intensity")
         st.caption("왼쪽 처리 설정의 SG 필터, baseline 보정, normalization 결과에서 최대값을 계산합니다.")
         sync_targets_to_graph_selection("max_targets",selected,plot_names)
-        max_targets=st.multiselect("최대값을 계산할 곡선",plot_names,key="max_targets")
+        max_target_selection=st.multiselect("최대값을 계산할 곡선",plot_names,key="max_targets")
+        selected_max_names=set(max_target_selection)
+        max_targets=[name for name in plot_names if name in selected_max_names]
         use_graph_range=st.checkbox("현재 그래프 X 범위 사용",value=True,key="max_use_graph_range")
         if use_graph_range:
             max_xmin,max_xmax=sorted((float(xmin),float(xmax)))
@@ -2503,7 +2505,9 @@ with tabs[2]:
         axis_series=[s for s in series if s["name"] not in error_source_names and str(s.get("x_label","X"))==stats_axis]
         axis_names=[s["name"] for s in axis_series]
         sync_targets_to_graph_selection("range_stats_targets",selected,axis_names)
-        stats_targets=st.multiselect("계산할 곡선",axis_names,key="range_stats_targets")
+        stats_target_selection=st.multiselect("계산할 곡선",axis_names,key="range_stats_targets")
+        selected_stats_names=set(stats_target_selection)
+        stats_targets=[name for name in axis_names if name in selected_stats_names]
         if stats_targets:
             selected_stats=[s for s in axis_series if s["name"] in stats_targets]
             range_min=min(float(np.nanmin(s["x"])) for s in selected_stats)
