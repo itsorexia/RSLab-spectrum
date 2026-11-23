@@ -1144,6 +1144,9 @@ def is_transient_widget_state_key(key):
     fixed={
         "uploads","session_upload","graph_palette_upload",
         "apply_session","save_full_session","save_graph_settings",
+        "session_save_filename","session_save_as_name","graph_settings_save_name","session_save_mode",
+        "graph_settings_save_mode",
+        "active_session_filename","active_session_scope",
         "loaded_error_link","loaded_error_unlink","curve_editor_apply","curve_editor_close",
         "select_all_graph_curves","reverse_curve_order","selected_curves_top",
         "selected_curves_up","selected_curves_bottom","selected_curves_down",
@@ -1175,7 +1178,10 @@ def state_json(series, session_state, scope="full"):
     """Save spectra and/or every serializable app setting."""
     data=[{key:json_safe(value) for key,value in item.items()} for item in series]
     excluded={"series","uploads","session_upload","graph_palette_upload",
-              "curve_editor_open","curve_editor_name","curve_editor_error"}
+              "curve_editor_open","curve_editor_name","curve_editor_error",
+              "session_save_filename","session_save_as_name","graph_settings_save_name",
+              "session_save_mode","graph_settings_save_mode",
+              "active_session_filename","active_session_scope"}
     settings={}
     for key,value in session_state.items():
         if key in excluded or str(key).startswith("_") or is_transient_widget_state_key(key):
@@ -1186,6 +1192,14 @@ def state_json(series, session_state, scope="full"):
             continue
     return json.dumps({"format":"rslab-session","version":3,"scope":scope,
                        "series":data,"settings":settings},ensure_ascii=False,allow_nan=False)
+
+def safe_download_stem(value, fallback="rslab_session"):
+    """Return a browser-download filename stem without path or forbidden characters."""
+    stem=Path(str(value or "")).name
+    if stem.lower().endswith(".json"):
+        stem=stem[:-5]
+    stem=re.sub(r'[\\/:*?"<>|]+',"_",stem).strip(" ._")
+    return stem or fallback
 
 def refresh_linked_errors(items):
     """Attach imported error-curve Y values to targets on the target X grid."""
@@ -1289,6 +1303,14 @@ def curve_archive(target_names, series, values_by_name, extension, errors_by_nam
             archive.writestr(filename,content)
     return archive_buffer.getvalue()
 
+pending_session_file=st.session_state.pop("_pending_loaded_session_file",None)
+if pending_session_file:
+    st.session_state["active_session_filename"]=pending_session_file["name"]
+    st.session_state["active_session_scope"]=pending_session_file["scope"]
+    st.session_state["session_save_as_name"]=pending_session_file["name"]+"_copy"
+    st.session_state["graph_settings_save_name"]=pending_session_file["name"]+"_settings"
+    st.session_state["session_save_mode"]="불러온 파일명으로 덮어쓰기"
+    st.session_state["graph_settings_save_mode"]="불러온 파일명으로 덮어쓰기"
 if "series" not in st.session_state: st.session_state.series=[]
 st.session_state.series=make_series_names_unique(st.session_state.series)
 st.session_state.setdefault("fit_results",[])
@@ -1377,13 +1399,46 @@ with st.sidebar:
         st.session_state["graph_selected"]=[]
         st.session_state["fit_results"]=[]
         st.session_state["graph_visible_fit_ids"]=[]
+    session=st.file_uploader("세션 불러오기 (.json)",type="json",key="session_upload")
+    active_session_name=st.session_state.get("active_session_filename")
+    active_session_scope=st.session_state.get("active_session_scope")
     st.caption("세션은 데이터와 그래프 설정을 함께 저장하거나, 그래프 설정만 따로 저장할 수 있습니다.")
+    if active_session_name and active_session_scope=="full":
+        save_action=st.radio("세션 저장 방식",["불러온 파일명으로 덮어쓰기","다른 이름으로 저장"],
+                             horizontal=True,key="session_save_mode")
+        if save_action=="불러온 파일명으로 덮어쓰기":
+            full_session_stem=active_session_name
+            st.caption(f"저장 파일명: {full_session_stem}.json")
+            st.caption("브라우저 보안상 파일을 자동으로 교체할 수는 없습니다. 저장 창이 뜨면 기존 파일을 선택해 교체하세요.")
+        else:
+            full_session_stem=safe_download_stem(
+                st.text_input("새 파일명 (확장자 제외)",key="session_save_as_name",placeholder="파일명을 입력하세요"),
+                active_session_name+"_copy")
+    else:
+        st.session_state.setdefault("session_save_filename",active_session_name or "rslab_session")
+        full_session_stem=safe_download_stem(
+            st.text_input("데이터 + 그래프 설정 파일명 (확장자 제외)",key="session_save_filename"),"rslab_session")
     if st.session_state.series:
         st.download_button("데이터 + 그래프 설정 저장",state_json(st.session_state.series,st.session_state,"full"),
-                           "rslab_session.json","application/json",use_container_width=True,key="save_full_session")
+                           f"{full_session_stem}.json","application/json",use_container_width=True,key="save_full_session")
+    if active_session_name and active_session_scope=="settings":
+        settings_action=st.radio("그래프 설정 저장 방식",["불러온 파일명으로 덮어쓰기","다른 이름으로 저장"],
+                                 horizontal=True,key="graph_settings_save_mode")
+        if settings_action=="불러온 파일명으로 덮어쓰기":
+            graph_settings_stem=active_session_name
+            st.caption("브라우저 보안상 파일을 자동으로 교체할 수는 없습니다. 저장 창이 뜨면 기존 파일을 선택해 교체하세요.")
+        else:
+            st.session_state.setdefault("graph_settings_save_name",active_session_name+"_copy")
+            graph_settings_stem=safe_download_stem(
+                st.text_input("새 그래프 설정 파일명 (확장자 제외)",key="graph_settings_save_name"),
+                active_session_name+"_copy")
+    else:
+        st.session_state.setdefault("graph_settings_save_name","rslab_graph_settings")
+        graph_settings_stem=safe_download_stem(
+            st.text_input("그래프 설정 파일명 (확장자 제외)",key="graph_settings_save_name"),
+            "rslab_graph_settings")
     st.download_button("그래프 설정만 저장",state_json([],st.session_state,"settings"),
-                       "rslab_graph_settings.json","application/json",use_container_width=True,key="save_graph_settings")
-    session=st.file_uploader("세션 불러오기 (.json)",type="json",key="session_upload")
+                       f"{graph_settings_stem}.json","application/json",use_container_width=True,key="save_graph_settings")
     if session and st.button("세션 적용",key="apply_session"):
         try:
             payload=json.loads(session.getvalue().decode("utf-8"))
@@ -1399,6 +1454,7 @@ with st.sidebar:
                 raise ValueError("RSLAB 세션 파일 형식이 올바르지 않습니다.")
             if scope not in {"full","settings"}:
                 raise ValueError("세션 파일의 저장 범위를 인식할 수 없습니다.")
+            loaded_stem=safe_download_stem(Path(session.name).stem)
             if scope=="full":
                 restored=[]
                 for item in raw_series:
@@ -1422,6 +1478,7 @@ with st.sidebar:
                 st.session_state["graph_visible_fit_ids"]=[]
             st.session_state["session_load_message"]=("그래프 설정을 적용했습니다. 현재 데이터는 유지했습니다."
                                                        if scope=="settings" else "세션을 적용했습니다.")
+            st.session_state["_pending_loaded_session_file"]={"name":loaded_stem,"scope":scope}
             st.rerun()
         except Exception as error:
             st.error(f"세션 파일을 적용하지 못했습니다: {error}")
