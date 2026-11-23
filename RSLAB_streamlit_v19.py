@@ -18,7 +18,7 @@ from scipy.sparse.linalg import spsolve
 from scipy.signal import find_peaks, savgol_filter
 from scipy.optimize import curve_fit
 
-st.set_page_config(page_title="RSLab Studio", layout="wide")
+st.set_page_config(page_title="RSLab Plotting Studio", layout="wide")
 
 st.markdown(
     """
